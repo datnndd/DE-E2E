@@ -7,17 +7,18 @@ Apache Airflow chạy bằng Docker Compose trong container riêng để điều
 - `airflow-postgres`: metadata database cho Airflow.
 - `airflow-init`: migrate DB và tạo user admin.
 - `airflow-api-server`: UI/API tại `http://localhost:8080`.
-- irflow-scheduler: lập lịch DAG bằng LocalExecutor.
-- irflow-dag-processor: parse DAG riêng theo kiến trúc Airflow 3.
-- `ingestion-worker`: container code Python, cung cấp JSON qua `GET /data` để Airflow lấy và chuyển lên cloud.
+- `airflow-scheduler`: lập lịch DAG bằng `LocalExecutor`.
+- `airflow-dag-processor`: parse DAG riêng theo kiến trúc Airflow 3.
+- `ingestion-worker`: container code Python, cung cấp JSON qua `GET /data` để Airflow lấy và ghi S3.
 
 ## Dockerfile boundaries
 
-- `airflow/Dockerfile`: Airflow runtime và cấu hình mặc định cho scheduler/webserver/init.
+- `airflow/Dockerfile`: Airflow runtime và cấu hình mặc định cho scheduler/api-server/dag-processor/init.
 - `ingestion-worker/Dockerfile`: Python runtime, dependencies và app command của ingestion worker.
 - `docker-compose.yml`: nối service, network, ports, volumes, healthcheck và runtime secrets.
 
-Không đưa `CLOUD_API_KEY` vào Dockerfile vì token sẽ bị bake vào image. Compose inject biến này lúc chạy.
+Không đưa `AWS_SECRET_ACCESS_KEY` hoặc `DOUYIN_COOKIE` vào Dockerfile vì secret sẽ bị bake vào image. Compose inject biến này lúc chạy.
+
 ## Khởi chạy
 
 ```powershell
@@ -43,6 +44,7 @@ Endpoint:
 
 - `GET /health`: kiểm tra service.
 - `GET /data`: trả JSON cho Airflow.
+- `POST /douyin/fetch`: gọi thủ công với body `{"link":"...","mode":"post","limit":20}`.
 
 ## Douyin ingestion
 
@@ -55,10 +57,10 @@ Endpoint:
 
 Module chính:
 
-- ingestion-worker/douyin/urls.py: lưu endpoint Douyin.
-- ingestion-worker/douyin/abogus.py: thuật toán _bogus.
-- ingestion-worker/douyin/xbogus.py: thuật toán X-Bogus.
-- ingestion-worker/douyin_client.py: client gọi API raw.
+- `ingestion-worker/douyin/urls.py`: lưu endpoint Douyin.
+- `ingestion-worker/douyin/abogus.py`: thuật toán `a_bogus`.
+- `ingestion-worker/douyin/xbogus.py`: thuật toán `X-Bogus`.
+- `ingestion-worker/douyin_client.py`: client gọi API raw.
 
 Cấu hình trong `.env`:
 
@@ -69,27 +71,50 @@ DOUYIN_MODE=post
 DOUYIN_LIMIT=20
 ```
 
-Endpoint worker:
-
-- `GET /data`: Airflow gọi endpoint này để lấy JSON theo `.env`.
-- `POST /douyin/fetch`: gọi thủ công với body `{"link":"...","mode":"post","limit":20}`.
-## Cloud ingest
+## AWS S3 Data Lake
 
 Cấu hình trong `.env`:
 
 ```powershell
-CLOUD_INGEST_URL=https://your-cloud-endpoint.example.com/ingest
-CLOUD_API_KEY=your-token
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_DEFAULT_REGION=ap-southeast-1
+S3_BUCKET=your-lakehouse-bucket
+S3_LANDING_PREFIX=landing/douyin/api_raw/json
 ```
 
-Nếu `CLOUD_INGEST_URL` trống, DAG chuyển cloud sẽ skip task gửi dữ liệu.
+Nếu `S3_BUCKET` trống, DAG ghi S3 sẽ skip task lưu dữ liệu.
 
+Landing raw path:
+
+```text
+s3://your-lakehouse-bucket/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
+```
+
+## Lakehouse Layers
+
+- `landing/`: dữ liệu gốc từ API, giữ nguyên JSON để audit/debug/replay.
+- `bronze/`: dữ liệu đã đọc từ landing, ép schema nhẹ, lưu Parquet.
+- `silver/`: dữ liệu clean/deduplicate/conformed.
+- `gold/`: bảng phục vụ dashboard/analytics.
+
+Flow hiện tại:
+
+```text
+Douyin API -> ingestion-worker -> Airflow -> S3 landing JSON
+```
+
+Flow bước sau:
+
+```text
+S3 landing JSON -> Spark -> S3 bronze Parquet
+```
 ## DAGs
 
 Đặt DAG tại `airflow/dags`.
 
 - `orchestration_healthcheck`: kiểm tra scheduler và task runtime.
-- `ingestion_worker_to_cloud_transfer`: lấy JSON từ `ingestion-worker`, rồi `POST` lên `CLOUD_INGEST_URL`.
+- `ingestion_worker_to_s3_landing`: lấy JSON gốc từ `ingestion-worker`, rồi ghi vào AWS S3 Landing.
 
 ## Lệnh hữu ích
 

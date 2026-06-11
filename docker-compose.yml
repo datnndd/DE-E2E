@@ -4,8 +4,11 @@ x-airflow-common: &airflow-common
     dockerfile: Dockerfile
   environment: &airflow-common-env
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
-    CLOUD_INGEST_URL: ${CLOUD_INGEST_URL:-}
-    CLOUD_API_KEY: ${CLOUD_API_KEY:-}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-southeast-1}
+    S3_BUCKET: ${S3_BUCKET:-}
+    S3_LANDING_PREFIX: ${S3_LANDING_PREFIX:-landing/douyin/api_raw/json}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
