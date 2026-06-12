@@ -27,11 +27,11 @@ docker compose up airflow-init
 docker compose up -d ingestion-worker airflow-api-server airflow-scheduler airflow-dag-processor
 ```
 
-Đăng nhập Airflow UI:
+Airflow UI dev mode:
 
 - URL: `http://localhost:8080`
-- Username: `airflow`
-- Password: `airflow`
+- SimpleAuth đang bật `all_admins`, nên môi trường local không cần user/password cố định.
+- Nếu vẫn hiện login do container cũ, rebuild/restart Airflow image.
 
 ## Ingestion Worker
 
@@ -80,6 +80,22 @@ Ghi chú:
 - Để trống `DOUYIN_END_TIME` nghĩa tới ngày hiện tại.
 - `DOUYIN_LIMIT=0` nghĩa lấy tất cả trang API trả về, không giới hạn số item.
 
+## Food Restaurant Seeds
+
+Seed niche hiện tại:
+
+```text
+seeds/douyin_food_restaurant_seeds.yml
+```
+
+File này chứa:
+
+- niche `douyin_food_restaurant`
+- keyword seed về ẩm thực/nhà hàng
+- 3 food creator links
+- crawl config mặc định: `mode=post`, `limit=50`, `start_time=2026-01-01`
+
+DAG `crawl_douyin_seed_to_s3_landing` đọc seed file, crawl từng account, rồi ghi mỗi account một file JSON vào S3 Landing.
 ## AWS S3 Data Lake
 
 Cấu hình trong `.env`:
@@ -145,8 +161,20 @@ Airflow sau này sẽ trigger Databricks Job bằng `apache-airflow-providers-da
 Đặt DAG tại `airflow/dags`.
 
 - `orchestration_healthcheck`: kiểm tra scheduler và task runtime.
-- `ingestion_worker_to_s3_landing`: lấy JSON gốc từ `ingestion-worker`, rồi ghi vào AWS S3 Landing.
+- `ingestion_worker_to_s3_landing`: lấy JSON từ một `DOUYIN_LINK`, rồi ghi vào AWS S3 Landing.
+- `crawl_douyin_seed_to_s3_landing`: đọc seed YAML, crawl từng account, rồi ghi từng account vào AWS S3 Landing.
 
+Seed crawl path:
+
+```text
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/niche=douyin_food_restaurant/account_id=food_creator_001/year=YYYY/month=MM/day=DD/{run_id}.json
+```
+
+Sau khi thêm/sửa DAG dependencies, rebuild Airflow image:
+
+```powershell
+docker compose build airflow-init airflow-api-server airflow-scheduler airflow-dag-processor
+```
 ## Lệnh Hữu Ích
 
 ```powershell

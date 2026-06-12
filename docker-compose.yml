@@ -1,4 +1,5 @@
 x-airflow-common: &airflow-common
+  image: de-e2e-airflow:3.2.2
   build:
     context: ./airflow
     dockerfile: Dockerfile
@@ -9,10 +10,12 @@ x-airflow-common: &airflow-common
     AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-southeast-1}
     S3_BUCKET: ${S3_BUCKET:-}
     S3_LANDING_PREFIX: ${S3_LANDING_PREFIX:-lakehouse/landing/douyin/api_raw/json}
+    DOUYIN_SEED_FILE: ${AIRFLOW_DOUYIN_SEED_FILE:-/opt/airflow/seeds/douyin_food_restaurant_seeds.yml}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
+    - ./seeds:/opt/airflow/seeds:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     airflow-postgres:
@@ -48,17 +51,8 @@ services:
       - |
         mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
         airflow db migrate
-        airflow users create \
-          --username "$${_AIRFLOW_WWW_USER_USERNAME:-airflow}" \
-          --password "$${_AIRFLOW_WWW_USER_PASSWORD:-airflow}" \
-          --firstname Airflow \
-          --lastname Admin \
-          --role Admin \
-          --email airflow@example.com || true
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
     restart: "no"
 
   airflow-api-server:
@@ -119,6 +113,9 @@ services:
       DOUYIN_LIMIT: ${DOUYIN_LIMIT:-20}
       DOUYIN_START_TIME: ${DOUYIN_START_TIME:-}
       DOUYIN_END_TIME: ${DOUYIN_END_TIME:-}
+      DOUYIN_SEED_FILE: ${DOUYIN_SEED_FILE:-/app/seeds/douyin_food_restaurant_seeds.yml}
+    volumes:
+      - ./seeds:/app/seeds:ro
     ports:
       - "${INGESTION_WORKER_PORT:-8000}:8000"
     healthcheck:

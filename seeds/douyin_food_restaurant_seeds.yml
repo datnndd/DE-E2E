@@ -1,0 +1,33 @@
+﻿niche: douyin_food_restaurant
+name: Douyin Food & Restaurant Trend Intelligence
+description: Track food and restaurant creator activity trends on Douyin.
+
+keywords:
+  - 美食
+  - 探店
+  - 餐厅推荐
+  - 小吃
+  - 火锅
+  - 咖啡
+  - 甜品
+  - 夜市
+  - 上海美食
+  - 成都美食
+  - 北京美食
+
+seed_accounts:
+  - id: food_creator_001
+    type: food_creator
+    link: "https://www.douyin.com/user/MS4wLjABAAAAMGzKpoVQbgKBp4Af3--mSNetVF-RxuwHaX9g1M0Ko58"
+  - id: food_creator_002
+    type: food_creator
+    link: "https://www.douyin.com/user/MS4wLjABAAAAipThqkwlfMAhqeGrZrFlUmsUhShXM9G2b9ETyS5MRkw?from_tab_name=main"
+  - id: food_creator_003
+    type: food_creator
+    link: "https://www.douyin.com/user/MS4wLjABAAAAAlDk2Ww2DQZdnL2kgpoeFORDM47uGnx98_-DhO8lE50"
+
+crawl_config:
+  mode: post
+  limit: 50
+  start_time: "2026-01-01"
+  end_time: ""

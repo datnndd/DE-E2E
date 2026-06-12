@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from urllib import request
 
 import boto3
-from airflow.exceptions import AirflowSkipException
+from airflow.sdk.exceptions import AirflowSkipException
 from airflow.sdk import dag, task
 
 

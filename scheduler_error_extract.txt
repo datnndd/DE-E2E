@@ -1,0 +1,280 @@
+﻿
+  airflow_scheduler_1015.log:50:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.265266Z [info     ] Worker starting up 
+pid=76      [airflow.executors.local_executor.LocalExecutor] loc=local_executor.py:80
+  airflow_scheduler_1015.log:51:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.282549Z [info     ] Worker starting up 
+pid=77      [airflow.executors.local_executor.LocalExecutor] loc=local_executor.py:80
+  airflow_scheduler_1015.log:52:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.293943Z [info     ] Adopting or 
+resetting orphaned tasks for active dag runs [airflow.jobs.scheduler_job_runner.SchedulerJobRunner] 
+loc=scheduler_job_runner.py:2811
+  airflow_scheduler_1015.log:53:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.325687Z [info     ] Worker starting up 
+pid=78      [airflow.executors.local_executor.LocalExecutor] loc=local_executor.py:80
+  airflow_scheduler_1015.log:54:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.399926Z [info     ] Marked 1 
+SchedulerJob instances as failed [airflow.jobs.scheduler_job_runner.SchedulerJobRunner] 
+loc=scheduler_job_runner.py:2835
+> airflow_scheduler_1015.log:55:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.797263Z [info     ] 1 tasks up for 
+execution:
+  airflow_scheduler_1015.log:56:de-e2e-airflow-scheduler  | 	<TaskInstance: 
+crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:00:43.277168+00:00 [scheduled] 
+ti_id=019ebb4b-695c-7bfd-8e57-04dfaa501e93> [airflow.jobs.scheduler_job_runner.SchedulerJobRunner] 
+loc=scheduler_job_runner.py:685
+  airflow_scheduler_1015.log:57:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.798002Z [info     ] DAG 
+crawl_douyin_seed_to_s3_landing has 0/16 running and queued tasks 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:769
+  airflow_scheduler_1015.log:58:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.798939Z [info     ] Setting the 
+following tasks to queued state (scheduler job_id=6):
+  airflow_scheduler_1015.log:59:de-e2e-airflow-scheduler  | 	<TaskInstance: 
+crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:00:43.277168+00:00 [scheduled] 
+ti_id=019ebb4b-695c-7bfd-8e57-04dfaa501e93> (id=019ebb4b-695c-7bfd-8e57-04dfaa501e93, try_number=3) 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:922
+  airflow_scheduler_1015.log:60:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.805644Z [info     ] Trying to enqueue 
+tasks: [<TaskInstance: crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:00:43.277168+00:00 
+[scheduled] ti_id=019ebb4b-695c-7bfd-8e57-04dfaa501e93>] for executor: LocalExecutor(parallelism=32) 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:1096
+  airflow_scheduler_1015.log:61:de-e2e-airflow-scheduler  | 2026-06-12T10:11:33.827026Z [warning  ] The HMAC key is 24 
+bytes long, which is below the minimum recommended length of 64 bytes for SHA512. See RFC 7518 Section 3.2. 
+[py.warnings] category=InsecureKeyLengthWarning 
+filename=/home/airflow/.local/lib/python3.11/site-packages/jwt/api_jwt.py lineno=147
+  airflow_scheduler_1015.log:62:de-e2e-airflow-scheduler  | 2026-06-12T10:11:34.145782Z [info     ] Secrets backends 
+loaded for worker [supervisor] backend_classes=['EnvironmentVariablesBackend', 'MetastoreBackend'] count=2 
+loc=supervisor.py:2286
+  airflow_scheduler_1015.log:63:de-e2e-airflow-scheduler  | 2026-06-12T10:11:34.185961Z [warning  ] Starting call to 
+'airflow.sdk.api.client.Client.request', this is the 1st time calling it. [airflow.sdk.api.client] loc=before.py:40
+  airflow_scheduler_1015.log:64:de-e2e-airflow-scheduler  | 2026-06-12T10:11:35.194030Z [warning  ] Starting call to 
+'airflow.sdk.api.client.Client.request', this is the 2nd time calling it. [airflow.sdk.api.client] loc=before.py:40
+  airflow_scheduler_1015.log:65:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:11:35] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:66:de-e2e-airflow-scheduler  | 2026-06-12T10:11:36.661111Z [warning  ] Starting call to 
+'airflow.sdk.api.client.Client.request', this is the 3rd time calling it. [airflow.sdk.api.client] loc=before.py:40
+  airflow_scheduler_1015.log:67:de-e2e-airflow-scheduler  | 2026-06-12 10:11:34.202855+00:00 [info     ] ::group::Pre 
+Execute           [task] loc=task_runner.py:1926
+  airflow_scheduler_1015.log:68:de-e2e-airflow-scheduler  | 2026-06-12T10:11:42.162631Z [info     ] Process exited     
+            [supervisor] exit_code=<Negsignal.SIGKILL: -9> loc=supervisor.py:859 pid=79 signal_sent=SIGKILL
+> airflow_scheduler_1015.log:69:de-e2e-airflow-scheduler  | 2026-06-12T10:11:42.166393Z [error    ] Task execution 
+failed.         [airflow.executors.local_executor.LocalExecutor] loc=local_executor.py:108
+> airflow_scheduler_1015.log:70:de-e2e-airflow-scheduler  | Traceback (most recent call last):
+  airflow_scheduler_1015.log:71:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/executors/local_executor.py", line 105, in _run_worker
+  airflow_scheduler_1015.log:72:de-e2e-airflow-scheduler  |     _execute_work(log, workload, team_conf)
+  airflow_scheduler_1015.log:73:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/executors/local_executor.py", line 144, in _execute_work
+> airflow_scheduler_1015.log:74:de-e2e-airflow-scheduler  |     supervise(
+> airflow_scheduler_1015.log:75:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/execution_time/supervisor.py", line 2295, in supervise
+> airflow_scheduler_1015.log:76:de-e2e-airflow-scheduler  |     process = ActivitySubprocess.start(
+  airflow_scheduler_1015.log:77:de-e2e-airflow-scheduler  |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+> airflow_scheduler_1015.log:78:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/execution_time/supervisor.py", line 1145, in start
+  airflow_scheduler_1015.log:79:de-e2e-airflow-scheduler  |     proc._on_child_started(
+> airflow_scheduler_1015.log:80:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/execution_time/supervisor.py", line 1167, in 
+_on_child_started
+  airflow_scheduler_1015.log:81:de-e2e-airflow-scheduler  |     ti_context = self.client.task_instances.start(ti.id, 
+self.pid, datetime.now(tz=timezone.utc))
+  airflow_scheduler_1015.log:82:de-e2e-airflow-scheduler  |                  
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:83:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/api/client.py", line 220, in start
+  airflow_scheduler_1015.log:84:de-e2e-airflow-scheduler  |     resp = self.client.patch(f"task-instances/{id}/run", 
+content=body.model_dump_json())
+  airflow_scheduler_1015.log:85:de-e2e-airflow-scheduler  |            
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:86:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/httpx/_client.py", line 1218, in patch
+  airflow_scheduler_1015.log:87:de-e2e-airflow-scheduler  |     return self.request(
+  airflow_scheduler_1015.log:88:de-e2e-airflow-scheduler  |            ^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:89:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 331, in wrapped_f
+  airflow_scheduler_1015.log:90:de-e2e-airflow-scheduler  |     return copy(f, *args, **kw)
+  airflow_scheduler_1015.log:91:de-e2e-airflow-scheduler  |            ^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:92:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 470, in __call__
+  airflow_scheduler_1015.log:93:de-e2e-airflow-scheduler  |     do = self.iter(retry_state=retry_state)
+  airflow_scheduler_1015.log:94:de-e2e-airflow-scheduler  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:95:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 371, in iter
+  airflow_scheduler_1015.log:96:de-e2e-airflow-scheduler  |     result = action(retry_state)
+  airflow_scheduler_1015.log:97:de-e2e-airflow-scheduler  |              ^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:98:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 393, in <lambda>
+  airflow_scheduler_1015.log:99:de-e2e-airflow-scheduler  |     self._add_action_func(lambda rs: rs.outcome.result())
+  airflow_scheduler_1015.log:100:de-e2e-airflow-scheduler  |                                      ^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:128:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/api/client.py", line 180, in get_json_error
+  airflow_scheduler_1015.log:129:de-e2e-airflow-scheduler  |     raise err
+  airflow_scheduler_1015.log:130:de-e2e-airflow-scheduler  | airflow.sdk.api.client.ServerResponseError: Invalid auth 
+token: Signature verification failed
+  airflow_scheduler_1015.log:131:de-e2e-airflow-scheduler  | Correlation-id=019ebb50-da82-7c04-aeb5-b867290d25e8
+  airflow_scheduler_1015.log:132:de-e2e-airflow-scheduler  | 2026-06-12T10:11:42.517220Z [info     ] Received executor 
+event with state failed for task instance TaskInstanceKey(dag_id='crawl_douyin_seed_to_s3_landing', 
+task_id='crawl_seed_accounts', run_id='manual__2026-06-12T10:00:43.277168+00:00', try_number=3, map_index=-1) 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:1255
+> airflow_scheduler_1015.log:133:de-e2e-airflow-scheduler  | 2026-06-12T10:11:42.542636Z [info     ] TaskInstance 
+Finished: dag_id=crawl_douyin_seed_to_s3_landing, task_id=crawl_seed_accounts, 
+run_id=manual__2026-06-12T10:00:43.277168+00:00, map_index=-1, ti_id=019ebb4b-695c-7bfd-8e57-04dfaa501e93, 
+run_start_date=None, run_end_date=2026-06-12 10:05:57.089135+00:00, run_duration=None, state=queued, 
+executor=LocalExecutor(parallelism=32), executor_state=failed, try_number=3, max_tries=2, pool=default_pool, 
+queue=default, priority_weight=1, operator=_PythonDecoratedOperator, queued_dttm=2026-06-12 10:11:33.799465+00:00, 
+scheduled_dttm=2026-06-12 10:11:33.693870+00:00,queued_by_job_id=6, pid=None 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:1344
+> airflow_scheduler_1015.log:134:de-e2e-airflow-scheduler  | 2026-06-12T10:11:42.545927Z [error    ] Executor 
+LocalExecutor(parallelism=32) reported that the task instance <TaskInstance: 
+crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:00:43.277168+00:00 [queued] 
+ti_id=019ebb4b-695c-7bfd-8e57-04dfaa501e93> finished with state failed, but the task instance's state attribute is 
+queued. Learn more: 
+https://airflow.apache.org/docs/apache-airflow/stable/troubleshooting.html#task-state-changed-externally 
+[airflow.task] loc=taskinstance.py:1657
+  airflow_scheduler_1015.log:135:de-e2e-airflow-scheduler  | 2026-06-12T10:11:42.552413Z [info     ] Marking task as 
+FAILED. dag_id=crawl_douyin_seed_to_s3_landing, task_id=crawl_seed_accounts, 
+run_id=manual__2026-06-12T10:00:43.277168+00:00, logical_date=20260612T100041, start_date=, end_date=20260612T101142 
+[airflow.models.taskinstance] loc=taskinstance.py:1749
+  airflow_scheduler_1015.log:136:de-e2e-airflow-scheduler  | 2026-06-12T10:11:43.480753Z [info     ] Marking run 
+<DagRun crawl_douyin_seed_to_s3_landing @ 2026-06-12 10:00:41+00:00: manual__2026-06-12T10:00:43.277168+00:00, 
+state:running, queued_at: 2026-06-12 10:05:42.149948+00:00. run_type: manual> failed [airflow.models.dagrun.DagRun] 
+loc=dagrun.py:1135
+  airflow_scheduler_1015.log:137:de-e2e-airflow-scheduler  | 2026-06-12T10:11:43.481242Z [info     ] DagRun Finished: 
+dag_id=crawl_douyin_seed_to_s3_landing, logical_date=2026-06-12 10:00:41+00:00, 
+run_id=manual__2026-06-12T10:00:43.277168+00:00, run_start_date=2026-06-12 10:00:43.948632+00:00, 
+run_end_date=2026-06-12 10:11:43.480977+00:00, run_duration=659.532345, state=failed, run_type=manual, 
+data_interval_start=2026-06-12 10:00:41+00:00, data_interval_end=2026-06-12 10:00:41+00:00, 
+[airflow.models.dagrun.DagRun] loc=dagrun.py:1231
+  airflow_scheduler_1015.log:138:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:12:05] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:139:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:12:35] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:140:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:13:05] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:141:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:13:35] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:142:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:14:05] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:143:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:14:35] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:144:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:15:05] "GET /health 
+HTTP/1.1" 200 -
+> airflow_scheduler_1015.log:145:de-e2e-airflow-scheduler  | 2026-06-12T10:15:10.724751Z [info     ] 1 tasks up for 
+execution:
+  airflow_scheduler_1015.log:146:de-e2e-airflow-scheduler  | 	<TaskInstance: 
+crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:15:09.236396+00:00 [scheduled] 
+ti_id=019ebb54-117d-73a9-8c44-33bfdcc12427> [airflow.jobs.scheduler_job_runner.SchedulerJobRunner] 
+loc=scheduler_job_runner.py:685
+  airflow_scheduler_1015.log:147:de-e2e-airflow-scheduler  | 2026-06-12T10:15:10.738551Z [info     ] DAG 
+crawl_douyin_seed_to_s3_landing has 0/16 running and queued tasks 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:769
+  airflow_scheduler_1015.log:148:de-e2e-airflow-scheduler  | 2026-06-12T10:15:10.739251Z [info     ] Setting the 
+following tasks to queued state (scheduler job_id=6):
+  airflow_scheduler_1015.log:149:de-e2e-airflow-scheduler  | 	<TaskInstance: 
+crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:15:09.236396+00:00 [scheduled] 
+ti_id=019ebb54-117d-73a9-8c44-33bfdcc12427> (id=019ebb54-117d-73a9-8c44-33bfdcc12427, try_number=1) 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:922
+  airflow_scheduler_1015.log:150:de-e2e-airflow-scheduler  | 2026-06-12T10:15:10.743228Z [info     ] Trying to enqueue 
+tasks: [<TaskInstance: crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:15:09.236396+00:00 
+[scheduled] ti_id=019ebb54-117d-73a9-8c44-33bfdcc12427>] for executor: LocalExecutor(parallelism=32) 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:1096
+  airflow_scheduler_1015.log:151:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.474548Z [info     ] Secrets backends 
+loaded for worker [supervisor] backend_classes=['EnvironmentVariablesBackend', 'MetastoreBackend'] count=2 
+loc=supervisor.py:2286
+  airflow_scheduler_1015.log:152:de-e2e-airflow-scheduler  | 2026-06-12 10:15:11.588623+00:00 [info     ] ::group::Pre 
+Execute           [task] loc=task_runner.py:1926
+  airflow_scheduler_1015.log:153:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.624348Z [info     ] Process exited    
+             [supervisor] exit_code=<Negsignal.SIGKILL: -9> loc=supervisor.py:859 pid=128 signal_sent=SIGKILL
+> airflow_scheduler_1015.log:154:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.626330Z [error    ] Task execution 
+failed.         [airflow.executors.local_executor.LocalExecutor] loc=local_executor.py:108
+> airflow_scheduler_1015.log:155:de-e2e-airflow-scheduler  | Traceback (most recent call last):
+  airflow_scheduler_1015.log:156:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/executors/local_executor.py", line 105, in _run_worker
+  airflow_scheduler_1015.log:157:de-e2e-airflow-scheduler  |     _execute_work(log, workload, team_conf)
+  airflow_scheduler_1015.log:158:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/executors/local_executor.py", line 144, in _execute_work
+> airflow_scheduler_1015.log:159:de-e2e-airflow-scheduler  |     supervise(
+> airflow_scheduler_1015.log:160:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/execution_time/supervisor.py", line 2295, in supervise
+> airflow_scheduler_1015.log:161:de-e2e-airflow-scheduler  |     process = ActivitySubprocess.start(
+  airflow_scheduler_1015.log:162:de-e2e-airflow-scheduler  |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+> airflow_scheduler_1015.log:163:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/execution_time/supervisor.py", line 1145, in start
+  airflow_scheduler_1015.log:164:de-e2e-airflow-scheduler  |     proc._on_child_started(
+> airflow_scheduler_1015.log:165:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/execution_time/supervisor.py", line 1167, in 
+_on_child_started
+  airflow_scheduler_1015.log:166:de-e2e-airflow-scheduler  |     ti_context = self.client.task_instances.start(ti.id, 
+self.pid, datetime.now(tz=timezone.utc))
+  airflow_scheduler_1015.log:167:de-e2e-airflow-scheduler  |                  
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:168:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/api/client.py", line 220, in start
+  airflow_scheduler_1015.log:169:de-e2e-airflow-scheduler  |     resp = self.client.patch(f"task-instances/{id}/run", 
+content=body.model_dump_json())
+  airflow_scheduler_1015.log:170:de-e2e-airflow-scheduler  |            
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:171:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/httpx/_client.py", line 1218, in patch
+  airflow_scheduler_1015.log:172:de-e2e-airflow-scheduler  |     return self.request(
+  airflow_scheduler_1015.log:173:de-e2e-airflow-scheduler  |            ^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:174:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 331, in wrapped_f
+  airflow_scheduler_1015.log:175:de-e2e-airflow-scheduler  |     return copy(f, *args, **kw)
+  airflow_scheduler_1015.log:176:de-e2e-airflow-scheduler  |            ^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:177:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 470, in __call__
+  airflow_scheduler_1015.log:178:de-e2e-airflow-scheduler  |     do = self.iter(retry_state=retry_state)
+  airflow_scheduler_1015.log:179:de-e2e-airflow-scheduler  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:180:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 371, in iter
+  airflow_scheduler_1015.log:181:de-e2e-airflow-scheduler  |     result = action(retry_state)
+  airflow_scheduler_1015.log:182:de-e2e-airflow-scheduler  |              ^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:183:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/tenacity/__init__.py", line 393, in <lambda>
+  airflow_scheduler_1015.log:184:de-e2e-airflow-scheduler  |     self._add_action_func(lambda rs: rs.outcome.result())
+  airflow_scheduler_1015.log:185:de-e2e-airflow-scheduler  |                                      ^^^^^^^^^^^^^^^^^^^
+  airflow_scheduler_1015.log:213:de-e2e-airflow-scheduler  |   File 
+"/home/airflow/.local/lib/python3.11/site-packages/airflow/sdk/api/client.py", line 180, in get_json_error
+  airflow_scheduler_1015.log:214:de-e2e-airflow-scheduler  |     raise err
+  airflow_scheduler_1015.log:215:de-e2e-airflow-scheduler  | airflow.sdk.api.client.ServerResponseError: Invalid auth 
+token: Signature verification failed
+  airflow_scheduler_1015.log:216:de-e2e-airflow-scheduler  | Correlation-id=019ebb54-19a4-75c4-839d-1f0beed74d61
+  airflow_scheduler_1015.log:217:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.906360Z [info     ] Received executor 
+event with state failed for task instance TaskInstanceKey(dag_id='crawl_douyin_seed_to_s3_landing', 
+task_id='crawl_seed_accounts', run_id='manual__2026-06-12T10:15:09.236396+00:00', try_number=1, map_index=-1) 
+[airflow.jobs.scheduler_job_runner.SchedulerJobRunner] loc=scheduler_job_runner.py:1255
+> airflow_scheduler_1015.log:218:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.924009Z [info     ] TaskInstance 
+Finished: dag_id=crawl_douyin_seed_to_s3_landing, task_id=crawl_seed_accounts, 
+run_id=manual__2026-06-12T10:15:09.236396+00:00, map_index=-1, ti_id=019ebb54-117d-73a9-8c44-33bfdcc12427, 
+run_start_date=None, run_end_date=None, run_duration=None, state=queued, executor=LocalExecutor(parallelism=32), 
+executor_state=failed, try_number=1, max_tries=0, pool=default_pool, queue=default, priority_weight=1, 
+operator=_PythonDecoratedOperator, queued_dttm=2026-06-12 10:15:10.739850+00:00, scheduled_dttm=2026-06-12 
+10:15:10.694579+00:00,queued_by_job_id=6, pid=None [airflow.jobs.scheduler_job_runner.SchedulerJobRunner] 
+loc=scheduler_job_runner.py:1344
+> airflow_scheduler_1015.log:219:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.929018Z [error    ] Executor 
+LocalExecutor(parallelism=32) reported that the task instance <TaskInstance: 
+crawl_douyin_seed_to_s3_landing.crawl_seed_accounts manual__2026-06-12T10:15:09.236396+00:00 [queued] 
+ti_id=019ebb54-117d-73a9-8c44-33bfdcc12427> finished with state failed, but the task instance's state attribute is 
+queued. Learn more: 
+https://airflow.apache.org/docs/apache-airflow/stable/troubleshooting.html#task-state-changed-externally 
+[airflow.task] loc=taskinstance.py:1657
+  airflow_scheduler_1015.log:220:de-e2e-airflow-scheduler  | 2026-06-12T10:15:11.943005Z [info     ] Marking task as 
+FAILED. dag_id=crawl_douyin_seed_to_s3_landing, task_id=crawl_seed_accounts, 
+run_id=manual__2026-06-12T10:15:09.236396+00:00, logical_date=20260612T101507, start_date=, end_date=20260612T101511 
+[airflow.models.taskinstance] loc=taskinstance.py:1749
+  airflow_scheduler_1015.log:221:de-e2e-airflow-scheduler  | 2026-06-12T10:15:12.997725Z [info     ] Marking run 
+<DagRun crawl_douyin_seed_to_s3_landing @ 2026-06-12 10:15:07+00:00: manual__2026-06-12T10:15:09.236396+00:00, 
+state:running, queued_at: 2026-06-12 10:15:09.287834+00:00. run_type: manual> failed [airflow.models.dagrun.DagRun] 
+loc=dagrun.py:1135
+  airflow_scheduler_1015.log:222:de-e2e-airflow-scheduler  | 2026-06-12T10:15:12.998896Z [info     ] DagRun Finished: 
+dag_id=crawl_douyin_seed_to_s3_landing, logical_date=2026-06-12 10:15:07+00:00, 
+run_id=manual__2026-06-12T10:15:09.236396+00:00, run_start_date=2026-06-12 10:15:10.521877+00:00, 
+run_end_date=2026-06-12 10:15:12.998608+00:00, run_duration=2.476731, state=failed, run_type=manual, 
+data_interval_start=2026-06-12 10:15:07+00:00, data_interval_end=2026-06-12 10:15:07+00:00, 
+[airflow.models.dagrun.DagRun] loc=dagrun.py:1231
+  airflow_scheduler_1015.log:223:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:15:35] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:224:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:16:06] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:225:de-e2e-airflow-scheduler  | 2026-06-12T10:16:33.433871Z [info     ] Adopting or 
+resetting orphaned tasks for active dag runs [airflow.jobs.scheduler_job_runner.SchedulerJobRunner] 
+loc=scheduler_job_runner.py:2811
+  airflow_scheduler_1015.log:226:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:16:36] "GET /health 
+HTTP/1.1" 200 -
+  airflow_scheduler_1015.log:227:de-e2e-airflow-scheduler  | 127.0.0.1 - - [12/Jun/2026 10:17:06] "GET /health 
+HTTP/1.1" 200 -
+
+
