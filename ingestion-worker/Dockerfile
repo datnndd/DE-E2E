@@ -4,14 +4,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     APP_ENV=local \
     DOUYIN_MODE=post \
-    DOUYIN_LIMIT=20
+    DOUYIN_LIMIT=20 \
+    DOUYIN_START_TIME= \
+    DOUYIN_END_TIME=
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY . .
 
 EXPOSE 8000
 

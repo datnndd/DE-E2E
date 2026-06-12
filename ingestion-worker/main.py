@@ -14,7 +14,9 @@ from douyin_client import DouyinClient
 class FetchRequest(BaseModel):
     link: str | None = None
     mode: str = Field(default="post", pattern="^(post|like)$")
-    limit: int = Field(default=20, ge=1, le=200)
+    limit: int = Field(default=20, ge=0, le=10000)
+    start_time: str = ""
+    end_time: str = ""
 
 
 class TransferPayload(BaseModel):
@@ -40,7 +42,13 @@ def fetch_douyin(request: FetchRequest) -> dict[str, Any]:
 
     try:
         client = DouyinClient(cookie=os.getenv("DOUYIN_COOKIE", "").strip() or None)
-        return client.fetch(link=link, mode=request.mode, limit=request.limit)
+        return client.fetch(
+            link=link,
+            mode=request.mode,
+            limit=request.limit,
+            start_time=request.start_time,
+            end_time=request.end_time,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -53,6 +61,8 @@ def get_data() -> TransferPayload:
 
     mode = os.getenv("DOUYIN_MODE", "post").strip() or "post"
     limit = int(os.getenv("DOUYIN_LIMIT", "20"))
+    start_time = os.getenv("DOUYIN_START_TIME", "").strip()
+    end_time = os.getenv("DOUYIN_END_TIME", "").strip()
     client = DouyinClient(cookie=os.getenv("DOUYIN_COOKIE", "").strip() or None)
-    data = client.fetch(link=link, mode=mode, limit=limit)
+    data = client.fetch(link=link, mode=mode, limit=limit, start_time=start_time, end_time=end_time)
     return TransferPayload(records=[data])

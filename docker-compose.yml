@@ -117,6 +117,8 @@ services:
       DOUYIN_COOKIE: ${DOUYIN_COOKIE:-}
       DOUYIN_MODE: ${DOUYIN_MODE:-post}
       DOUYIN_LIMIT: ${DOUYIN_LIMIT:-20}
+      DOUYIN_START_TIME: ${DOUYIN_START_TIME:-}
+      DOUYIN_END_TIME: ${DOUYIN_END_TIME:-}
     ports:
       - "${INGESTION_WORKER_PORT:-8000}:8000"
     healthcheck:

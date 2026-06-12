@@ -44,7 +44,7 @@ Endpoint:
 
 - `GET /health`: kiểm tra service.
 - `GET /data`: trả JSON cho Airflow.
-- `POST /douyin/fetch`: gọi thủ công với body `{"link":"...","mode":"post","limit":20}`.
+- `POST /douyin/fetch`: gọi thủ công với body `{"link":"...","mode":"post","limit":0,"start_time":"2026-01-01","end_time":"2026-06-11"}`.
 
 ## Douyin ingestion
 
@@ -69,7 +69,16 @@ DOUYIN_LINK=https://www.douyin.com/user/...
 DOUYIN_COOKIE="msToken=...; ttwid=...; odin_tt=...; passport_csrf_token=...; sid_guard=...;"
 DOUYIN_MODE=post
 DOUYIN_LIMIT=20
+DOUYIN_START_TIME=2026-01-01
+DOUYIN_END_TIME=2026-06-11
 ```
+
+Ghi ch?:
+
+- `DOUYIN_START_TIME` v? `DOUYIN_END_TIME` d?ng ??nh d?ng `YYYY-MM-DD`.
+- ?? tr?ng `DOUYIN_START_TIME` ngh?a t? `1970-01-01`.
+- ?? tr?ng `DOUYIN_END_TIME` ngh?a t?i ng?y hi?n t?i.
+- `DOUYIN_LIMIT=0` ngh?a l?y t?t c? trang API tr? v?, kh?ng gi?i h?n s? item.
 
 ## AWS S3 Data Lake
 
