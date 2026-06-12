@@ -1,4 +1,4 @@
-# DE-E2E Orchestration
+﻿# DE-E2E Orchestration
 
 Apache Airflow chạy bằng Docker Compose trong container riêng để điều phối pipeline.
 
@@ -9,9 +9,9 @@ Apache Airflow chạy bằng Docker Compose trong container riêng để điều
 - `airflow-api-server`: UI/API tại `http://localhost:8080`.
 - `airflow-scheduler`: lập lịch DAG bằng `LocalExecutor`.
 - `airflow-dag-processor`: parse DAG riêng theo kiến trúc Airflow 3.
-- `ingestion-worker`: container code Python, cung cấp JSON qua `GET /data` để Airflow lấy và ghi S3.
+- `ingestion-worker`: container Python gọi Douyin API, trả JSON qua `GET /data`.
 
-## Dockerfile boundaries
+## Dockerfile Boundaries
 
 - `airflow/Dockerfile`: Airflow runtime và cấu hình mặc định cho scheduler/api-server/dag-processor/init.
 - `ingestion-worker/Dockerfile`: Python runtime, dependencies và app command của ingestion worker.
@@ -19,7 +19,7 @@ Apache Airflow chạy bằng Docker Compose trong container riêng để điều
 
 Không đưa `AWS_SECRET_ACCESS_KEY` hoặc `DOUYIN_COOKIE` vào Dockerfile vì secret sẽ bị bake vào image. Compose inject biến này lúc chạy.
 
-## Khởi chạy
+## Khởi Chạy
 
 ```powershell
 Copy-Item .env.example .env
@@ -44,9 +44,9 @@ Endpoint:
 
 - `GET /health`: kiểm tra service.
 - `GET /data`: trả JSON cho Airflow.
-- `POST /douyin/fetch`: gọi thủ công với body `{"link":"...","mode":"post","limit":0,"start_time":"2026-01-01","end_time":"2026-06-11"}`.
+- `POST /douyin/fetch`: gọi thủ công với body `{"link":"...","mode":"post","limit":0,"start_time":"2026-01-01","end_time":"2026-06-12"}`.
 
-## Douyin ingestion
+## Douyin Ingestion
 
 `ingestion-worker` đã port phần gọi dữ liệu từ `datnndd/douyin-download`, gồm endpoint registry, `a_bogus`, `X-Bogus`, và chỉ giữ fetch JSON thô:
 
@@ -70,15 +70,15 @@ DOUYIN_COOKIE="msToken=...; ttwid=...; odin_tt=...; passport_csrf_token=...; sid
 DOUYIN_MODE=post
 DOUYIN_LIMIT=20
 DOUYIN_START_TIME=2026-01-01
-DOUYIN_END_TIME=2026-06-11
+DOUYIN_END_TIME=2026-06-12
 ```
 
-Ghi ch?:
+Ghi chú:
 
-- `DOUYIN_START_TIME` v? `DOUYIN_END_TIME` d?ng ??nh d?ng `YYYY-MM-DD`.
-- ?? tr?ng `DOUYIN_START_TIME` ngh?a t? `1970-01-01`.
-- ?? tr?ng `DOUYIN_END_TIME` ngh?a t?i ng?y hi?n t?i.
-- `DOUYIN_LIMIT=0` ngh?a l?y t?t c? trang API tr? v?, kh?ng gi?i h?n s? item.
+- `DOUYIN_START_TIME` và `DOUYIN_END_TIME` dùng định dạng `YYYY-MM-DD`.
+- Để trống `DOUYIN_START_TIME` nghĩa từ `1970-01-01`.
+- Để trống `DOUYIN_END_TIME` nghĩa tới ngày hiện tại.
+- `DOUYIN_LIMIT=0` nghĩa lấy tất cả trang API trả về, không giới hạn số item.
 
 ## AWS S3 Data Lake
 
@@ -89,7 +89,7 @@ AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_DEFAULT_REGION=ap-southeast-1
 S3_BUCKET=your-lakehouse-bucket
-S3_LANDING_PREFIX=landing/douyin/api_raw/json
+S3_LANDING_PREFIX=lakehouse/landing/douyin/api_raw/json
 ```
 
 Nếu `S3_BUCKET` trống, DAG ghi S3 sẽ skip task lưu dữ liệu.
@@ -97,13 +97,13 @@ Nếu `S3_BUCKET` trống, DAG ghi S3 sẽ skip task lưu dữ liệu.
 Landing raw path:
 
 ```text
-s3://your-lakehouse-bucket/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
 ```
 
 ## Lakehouse Layers
 
 - `landing/`: dữ liệu gốc từ API, giữ nguyên JSON để audit/debug/replay.
-- `bronze/`: dữ liệu đã đọc từ landing, ép schema nhẹ, lưu Parquet.
+- `bronze/`: dữ liệu đã đọc từ landing, ép schema nhẹ, lưu Delta table.
 - `silver/`: dữ liệu clean/deduplicate/conformed.
 - `gold/`: bảng phục vụ dashboard/analytics.
 
@@ -116,8 +116,30 @@ Douyin API -> ingestion-worker -> Airflow -> S3 landing JSON
 Flow bước sau:
 
 ```text
-S3 landing JSON -> Spark -> S3 bronze Parquet
+S3 landing JSON -> Databricks/Spark -> S3 bronze Delta
 ```
+
+## Databricks Lakehouse Target
+
+Databricks không phải nơi lưu file gốc. S3 là storage layer; Databricks là compute, Delta Lake và catalog layer.
+
+Target layout:
+
+```text
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
+s3://your-lakehouse-bucket/lakehouse/bronze/douyin/aweme_delta/
+s3://your-lakehouse-bucket/lakehouse/silver/douyin/aweme_clean_delta/
+s3://your-lakehouse-bucket/lakehouse/gold/douyin/content_performance_daily_delta/
+```
+
+Flow Databricks bước sau:
+
+```text
+S3 landing JSON -> Databricks Job -> Bronze Delta -> Silver Delta -> Gold Delta
+```
+
+Airflow sau này sẽ trigger Databricks Job bằng `apache-airflow-providers-databricks`.
+
 ## DAGs
 
 Đặt DAG tại `airflow/dags`.
@@ -125,7 +147,7 @@ S3 landing JSON -> Spark -> S3 bronze Parquet
 - `orchestration_healthcheck`: kiểm tra scheduler và task runtime.
 - `ingestion_worker_to_s3_landing`: lấy JSON gốc từ `ingestion-worker`, rồi ghi vào AWS S3 Landing.
 
-## Lệnh hữu ích
+## Lệnh Hữu Ích
 
 ```powershell
 docker compose ps

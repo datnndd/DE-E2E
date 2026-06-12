@@ -31,7 +31,7 @@ def ingestion_worker_to_s3_landing():
         if not bucket:
             raise AirflowSkipException("S3_BUCKET is not configured")
 
-        prefix = os.getenv("S3_LANDING_PREFIX", "landing/douyin/api_raw/json").strip().strip("/")
+        prefix = os.getenv("S3_LANDING_PREFIX", "lakehouse/landing/douyin/api_raw/json").strip().strip("/")
         now = datetime.now(timezone.utc)
         run_id = str(payload.get("run_id") or now.strftime("%Y%m%dT%H%M%S%f"))
         key = (
