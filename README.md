@@ -5,7 +5,7 @@ Apache Airflow chạy bằng Docker Compose trong container riêng để điều
 ## Thành phần
 
 - `airflow-postgres`: metadata database cho Airflow.
-- `airflow-init`: migrate DB và tạo user admin.
+- `airflow-init`: migrate metadata DB, chỉ chạy khi gọi profile `init`.
 - `airflow-api-server`: UI/API tại `http://localhost:8080`.
 - `airflow-scheduler`: lập lịch DAG bằng `LocalExecutor`.
 - `airflow-dag-processor`: parse DAG riêng theo kiến trúc Airflow 3.
@@ -23,8 +23,8 @@ Không đưa `AWS_SECRET_ACCESS_KEY` hoặc `DOUYIN_COOKIE` vào Dockerfile vì 
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up airflow-init
-docker compose up -d ingestion-worker airflow-api-server airflow-scheduler airflow-dag-processor
+docker compose --profile init up airflow-init
+docker compose up -d
 ```
 
 Airflow UI dev mode:
@@ -33,6 +33,21 @@ Airflow UI dev mode:
 - SimpleAuth đang bật `all_admins`, nên môi trường local không cần user/password cố định.
 - Nếu vẫn hiện login do container cũ, rebuild/restart Airflow image.
 
+## Chạy Hằng Ngày
+
+Sau khi đã init DB một lần, chạy toàn bộ service chính:
+
+```powershell
+docker compose up -d
+```
+
+`airflow-init` nằm trong profile `init`, nên lệnh trên không chạy lại init.
+
+Khi cần init/migrate DB:
+
+```powershell
+docker compose --profile init up airflow-init
+```
 ## Ingestion Worker
 
 Worker API chạy tại:
@@ -106,6 +121,8 @@ AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_DEFAULT_REGION=ap-southeast-1
 S3_BUCKET=your-lakehouse-bucket
 S3_LANDING_PREFIX=lakehouse/landing/douyin/api_raw/json
+S3_MEDIA_PREFIX=lakehouse/landing/douyin/media_raw
+DOUYIN_DOWNLOAD_MEDIA=true
 ```
 
 Nếu `S3_BUCKET` trống, DAG ghi S3 sẽ skip task lưu dữ liệu.
@@ -116,6 +133,17 @@ Landing raw path:
 s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
 ```
 
+Media raw path:
+
+```text
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/media_raw/niche=douyin_food_restaurant/account_id=food_creator_001/aweme_id=.../media_type=video/year=YYYY/month=MM/day=DD/video_0.mp4
+```
+
+DAG tải media ngay sau khi gọi Douyin API vì URL video/ảnh tạm thời có thể hết hạn sau vài phút. JSON Landing sẽ được enrich thêm:
+
+- `media_uploads`: danh sách media đã upload.
+- `raw.aweme_list[].s3_media[]`: danh sách `s3_url` theo từng video/post.
+- `video.play_addr.s3_url`, `images[].s3_url`, `video.cover.s3_url`, `author.avatar.s3_url` nếu upload thành công.
 ## Lakehouse Layers
 
 - `landing/`: dữ liệu gốc từ API, giữ nguyên JSON để audit/debug/replay.
@@ -170,10 +198,10 @@ Seed crawl path:
 s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/niche=douyin_food_restaurant/account_id=food_creator_001/year=YYYY/month=MM/day=DD/{run_id}.json
 ```
 
-Sau khi thêm/sửa DAG dependencies, rebuild Airflow image:
+Sau khi thêm/sửa Airflow dependencies, rebuild shared Airflow image:
 
 ```powershell
-docker compose build airflow-init airflow-api-server airflow-scheduler airflow-dag-processor
+docker compose build airflow-init
 ```
 ## Lệnh Hữu Ích
 
