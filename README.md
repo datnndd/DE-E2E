@@ -1,4 +1,4 @@
-﻿# DE-E2E Orchestration
+# DE-E2E Orchestration
 
 Apache Airflow chạy bằng Docker Compose trong container riêng để điều phối pipeline.
 
@@ -66,7 +66,7 @@ Endpoint:
 `ingestion-worker` đã port phần gọi dữ liệu từ `datnndd/douyin-download`, gồm endpoint registry, `a_bogus`, `X-Bogus`, và chỉ giữ fetch JSON thô:
 
 - Bỏ chuẩn hóa dữ liệu.
-- Bỏ download video/music/cover/avatar.
+- Tải video/ảnh/cover/avatar lên S3 Landing media; bỏ download music.
 - Bỏ database incremental.
 - Bỏ n8n workflow.
 
@@ -122,6 +122,7 @@ AWS_DEFAULT_REGION=ap-southeast-1
 S3_BUCKET=your-lakehouse-bucket
 S3_LANDING_PREFIX=lakehouse/landing/douyin/api_raw/json
 S3_MEDIA_PREFIX=lakehouse/landing/douyin/media_raw
+S3_MEDIA_MANIFEST_PREFIX=lakehouse/landing/douyin/media_manifest/json
 DOUYIN_DOWNLOAD_MEDIA=true
 ```
 
@@ -130,20 +131,24 @@ Nếu `S3_BUCKET` trống, DAG ghi S3 sẽ skip task lưu dữ liệu.
 Landing raw path:
 
 ```text
-s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/niche=douyin_food_restaurant/account_id=food_creator_001/year=YYYY/month=MM/day=DD/{run_id}.json
 ```
 
 Media raw path:
 
 ```text
-s3://your-lakehouse-bucket/lakehouse/landing/douyin/media_raw/niche=douyin_food_restaurant/account_id=food_creator_001/aweme_id=.../media_type=video/year=YYYY/month=MM/day=DD/video_0.mp4
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/media_raw/niche=douyin_food_restaurant/account_id=food_creator_001/files/7523123456789_video_0.mp4
 ```
 
-DAG tải media ngay sau khi gọi Douyin API vì URL video/ảnh tạm thời có thể hết hạn sau vài phút. JSON Landing sẽ được enrich thêm:
+DAG tải media ngay sau khi gọi Douyin API vì URL video/ảnh tạm thời có thể hết hạn sau vài phút. Media được gom vào một folder `files/` theo từng `account_id`; manifest giữ mapping về `aweme_id`, loại media và đường dẫn S3.
 
-- `media_uploads`: danh sách media đã upload.
-- `raw.aweme_list[].s3_media[]`: danh sách `s3_url` theo từng video/post.
-- `video.play_addr.s3_url`, `images[].s3_url`, `video.cover.s3_url`, `author.avatar.s3_url` nếu upload thành công.
+JSON Landing giữ `raw` sạch, không nhét `s3_url` vào response Douyin. Danh sách media đã upload nằm ở manifest riêng:
+
+```text
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/media_manifest/json/niche=douyin_food_restaurant/account_id=food_creator_001/year=YYYY/month=MM/day=DD/{run_id}.json
+```
+
+Manifest chứa `aweme_id`, `media_type`, `index`, `s3_key`, `s3_url`, `bytes`, `status`. Silver/Gold đọc manifest để join media với aweme.
 ## Lakehouse Layers
 
 - `landing/`: dữ liệu gốc từ API, giữ nguyên JSON để audit/debug/replay.
@@ -170,7 +175,7 @@ Databricks không phải nơi lưu file gốc. S3 là storage layer; Databricks 
 Target layout:
 
 ```text
-s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/year=YYYY/month=MM/day=DD/{run_id}.json
+s3://your-lakehouse-bucket/lakehouse/landing/douyin/api_raw/json/niche=douyin_food_restaurant/account_id=food_creator_001/year=YYYY/month=MM/day=DD/{run_id}.json
 s3://your-lakehouse-bucket/lakehouse/bronze/douyin/aweme_delta/
 s3://your-lakehouse-bucket/lakehouse/silver/douyin/aweme_clean_delta/
 s3://your-lakehouse-bucket/lakehouse/gold/douyin/content_performance_daily_delta/

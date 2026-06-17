@@ -11,6 +11,7 @@ x-airflow-common: &airflow-common
     S3_BUCKET: ${S3_BUCKET:-}
     S3_LANDING_PREFIX: ${S3_LANDING_PREFIX:-lakehouse/landing/douyin/api_raw/json}
     S3_MEDIA_PREFIX: ${S3_MEDIA_PREFIX:-lakehouse/landing/douyin/media_raw}
+    S3_MEDIA_MANIFEST_PREFIX: ${S3_MEDIA_MANIFEST_PREFIX:-lakehouse/landing/douyin/media_manifest/json}
     DOUYIN_DOWNLOAD_MEDIA: ${DOUYIN_DOWNLOAD_MEDIA:-true}
     DOUYIN_SEED_FILE: ${AIRFLOW_DOUYIN_SEED_FILE:-/opt/airflow/seeds/douyin_food_restaurant_seeds.yml}
   volumes:

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -133,29 +133,15 @@ def crawl_douyin_seed_to_s3_landing():
         with request.urlopen(req, timeout=180) as response:
             return response.read(), response.headers.get("Content-Type")
 
-    def attach_media_s3_url(aweme: dict, media: dict, s3_url: str, key: str) -> None:
+    def build_media_key(media_prefix: str, account: dict, media: dict) -> str:
         media_type = media["media_type"]
-        record = {
-            "media_type": media_type,
-            "index": media["index"],
-            "s3_url": s3_url,
-            "s3_key": key,
-            "source_url": media["url"],
-        }
-        aweme.setdefault("s3_media", []).append(record)
+        extension = MEDIA_EXTENSIONS.get(media_type, "bin")
+        account_prefix = f"{media_prefix}/niche={account['niche']}/account_id={account['account_id']}/files"
+        if media_type == "avatar":
+            return f"{account_prefix}/user_avatar_{media['index']}.{extension}"
+        return f"{account_prefix}/{media['aweme_id']}_{media_type}_{media['index']}.{extension}"
 
-        if media_type == "video":
-            aweme.setdefault("video", {}).setdefault("play_addr", {})["s3_url"] = s3_url
-        elif media_type == "image":
-            images = aweme.get("images") or []
-            if media["index"] < len(images):
-                images[media["index"]]["s3_url"] = s3_url
-        elif media_type == "cover":
-            aweme.setdefault("video", {}).setdefault("cover", {})["s3_url"] = s3_url
-        elif media_type == "avatar":
-            aweme.setdefault("author", {}).setdefault("avatar", {})["s3_url"] = s3_url
-
-    def upload_aweme_media(client, bucket: str, account: dict, raw_response: dict, now: datetime) -> list[dict]:
+    def upload_aweme_media(client, bucket: str, account: dict, raw_response: dict) -> list[dict]:
         if os.getenv("DOUYIN_DOWNLOAD_MEDIA", "true").lower() not in {"1", "true", "yes"}:
             logger.info("Media download disabled by DOUYIN_DOWNLOAD_MEDIA")
             return []
@@ -168,13 +154,7 @@ def crawl_douyin_seed_to_s3_landing():
         for aweme in awemes:
             for media in extract_media_tasks(aweme):
                 media_type = media["media_type"]
-                extension = MEDIA_EXTENSIONS.get(media_type, "bin")
-                key = (
-                    f"{media_prefix}/niche={account['niche']}/account_id={account['account_id']}/"
-                    f"aweme_id={media['aweme_id']}/media_type={media_type}/"
-                    f"year={now:%Y}/month={now:%m}/day={now:%d}/"
-                    f"{media_type}_{media['index']}.{extension}"
-                )
+                key = build_media_key(media_prefix, account, media)
                 try:
                     logger.info("Downloading %s for aweme_id=%s", media_type, media["aweme_id"])
                     body, response_content_type = download_bytes(media["url"])
@@ -195,16 +175,72 @@ def crawl_douyin_seed_to_s3_landing():
                         },
                     )
                     s3_url = f"s3://{bucket}/{key}"
-                    attach_media_s3_url(aweme, media, s3_url, key)
-                    uploaded.append({"aweme_id": media["aweme_id"], "media_type": media_type, "s3_url": s3_url, "bytes": len(body)})
+                    uploaded.append(
+                        {
+                            "status": "uploaded",
+                            "account_id": account["account_id"],
+                            "aweme_id": media["aweme_id"],
+                            "media_type": media_type,
+                            "index": media["index"],
+                            "s3_key": key,
+                            "s3_url": s3_url,
+                            "bytes": len(body),
+                            "content_type": content_type,
+                            "source_url": media["url"],
+                        }
+                    )
                 except Exception as exc:
                     logger.warning("Media upload failed media_type=%s aweme_id=%s error=%s", media_type, media["aweme_id"], exc)
-                    aweme.setdefault("s3_media_errors", []).append(
-                        {"media_type": media_type, "index": media["index"], "source_url": media["url"], "error": str(exc)}
+                    uploaded.append(
+                        {
+                            "status": "failed",
+                            "account_id": account["account_id"],
+                            "aweme_id": media["aweme_id"],
+                            "media_type": media_type,
+                            "index": media["index"],
+                            "source_url": media["url"],
+                            "error": str(exc),
+                        }
                     )
 
-        logger.info("Uploaded %s media objects", len(uploaded))
+        logger.info("Processed %s media objects", len(uploaded))
         return uploaded
+
+    def write_media_manifest(client, bucket: str, account: dict, media_uploads: list[dict], now: datetime, run_id: str) -> dict | None:
+        if not media_uploads:
+            return None
+
+        manifest_prefix = os.getenv("S3_MEDIA_MANIFEST_PREFIX", "lakehouse/landing/douyin/media_manifest/json").strip().strip("/")
+        key = (
+            f"{manifest_prefix}/niche={account['niche']}/account_id={account['account_id']}/"
+            f"year={now:%Y}/month={now:%m}/day={now:%d}/{run_id}.json"
+        )
+        manifest_payload = {
+            "pipeline": "de-e2e",
+            "source": "douyin",
+            "zone": "landing",
+            "artifact": "media_manifest",
+            "niche": account["niche"],
+            "account_id": account["account_id"],
+            "generated_at": now.isoformat(),
+            "items": media_uploads,
+        }
+        body = json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        logger.info("Writing media manifest to s3://%s/%s", bucket, key)
+        client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json; charset=utf-8",
+            Metadata={
+                "zone": "landing",
+                "source": "douyin",
+                "artifact": "media_manifest",
+                "niche": account["niche"],
+                "account_id": account["account_id"],
+            },
+        )
+        return {"bucket": bucket, "key": key, "uri": f"s3://{bucket}/{key}", "bytes": len(body), "media_count": len(media_uploads)}
 
     def write_landing(account: dict, raw_response: dict) -> dict:
         bucket = os.getenv("S3_BUCKET", "").strip()
@@ -215,7 +251,8 @@ def crawl_douyin_seed_to_s3_landing():
         run_id = now.strftime("%Y%m%dT%H%M%S%f")
         prefix = os.getenv("S3_LANDING_PREFIX", "lakehouse/landing/douyin/api_raw/json").strip().strip("/")
         client = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION") or None)
-        media_uploads = upload_aweme_media(client, bucket, account, raw_response, now)
+        media_uploads = upload_aweme_media(client, bucket, account, raw_response)
+        media_manifest = write_media_manifest(client, bucket, account, media_uploads, now, run_id)
         key = (
             f"{prefix}/niche={account['niche']}/account_id={account['account_id']}/"
             f"year={now:%Y}/month={now:%m}/day={now:%d}/{run_id}.json"
@@ -235,7 +272,7 @@ def crawl_douyin_seed_to_s3_landing():
                 "end_time": account["end_time"],
             },
             "generated_at": now.isoformat(),
-            "media_uploads": media_uploads,
+            "media_manifest": media_manifest,
             "raw": raw_response,
         }
         body = json.dumps(landing_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
