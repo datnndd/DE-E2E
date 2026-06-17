@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import logging
 import os
@@ -39,8 +41,125 @@ MEDIA_EXTENSIONS = {
 )
 def crawl_douyin_seed_to_s3_landing():
     def load_seed_targets() -> list[dict]:
-        seed_file = Path(os.getenv("DOUYIN_SEED_FILE", "/opt/airflow/seeds/douyin_food_restaurant_seeds.yml"))
-        logger.info("Loading seed file: %s", seed_file)
+        csv_file = discover_seed_csv_file()
+        yaml_file = Path(os.getenv("DOUYIN_SEED_FILE", "/opt/airflow/seeds/douyin_food_restaurant_seeds.yml"))
+        if csv_file:
+            return load_seed_targets_from_csv(csv_file)
+        return load_seed_targets_from_yaml(yaml_file)
+
+    def discover_seed_csv_file() -> Path | None:
+        explicit_file = os.getenv("DOUYIN_SEED_CSV_FILE", "").strip()
+        if explicit_file:
+            path = Path(explicit_file)
+            if path.exists():
+                logger.info("Using explicit seed CSV file: %s", path)
+                return path
+            logger.warning("Explicit seed CSV file does not exist, auto-discovery will be used: %s", path)
+
+        seed_dir = Path(os.getenv("DOUYIN_SEED_CSV_DIR", "/opt/airflow/seeds"))
+        pattern = os.getenv("DOUYIN_SEED_CSV_PATTERN", "*.csv").strip() or "*.csv"
+        if not seed_dir.exists():
+            logger.warning("Seed CSV directory does not exist: %s", seed_dir)
+            return None
+
+        candidates = [path for path in seed_dir.glob(pattern) if path.is_file() and not path.name.startswith(".")]
+        if not candidates:
+            logger.info("No seed CSV files found in %s with pattern %s", seed_dir, pattern)
+            return None
+
+        for candidate in sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True):
+            if not seed_csv_was_processed(candidate):
+                logger.info("Auto-discovered latest unprocessed seed CSV file: %s", candidate)
+                return candidate
+
+        raise AirflowSkipException("All discovered seed CSV files were already processed successfully")
+
+    def seed_file_hash(seed_file: Path) -> str:
+        digest = hashlib.sha256()
+        with seed_file.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def seed_manifest_key(file_hash: str) -> str:
+        prefix = os.getenv("S3_CONTROL_PREFIX", "lakehouse/control/douyin/processed_seed_files").strip().strip("/")
+        return f"{prefix}/{file_hash}.json"
+
+    def seed_csv_was_processed(seed_file: Path) -> bool:
+        bucket = os.getenv("S3_BUCKET", "").strip()
+        if not bucket:
+            logger.warning("S3_BUCKET is not configured; seed CSV processed-state check is disabled")
+            return False
+
+        file_hash = seed_file_hash(seed_file)
+        key = seed_manifest_key(file_hash)
+        client = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION") or None)
+        try:
+            client.head_object(Bucket=bucket, Key=key)
+            logger.info("Seed CSV already processed successfully: file=%s hash=%s", seed_file.name, file_hash)
+            return True
+        except client.exceptions.ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code")
+            if error_code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+
+
+    def slugify(value: str) -> str:
+        slug = "".join(char.lower() if char.isalnum() else "_" for char in value.strip())
+        return "_".join(part for part in slug.split("_") if part)
+
+    def default_account_type(niche: str) -> str:
+        slug = slugify(niche)
+        if "food" in slug or "restaurant" in slug:
+            return "food_creator"
+        base = slug.removeprefix("douyin_").split("_")[0] or "creator"
+        return f"{base}_creator"
+
+    def load_seed_targets_from_csv(seed_file: Path) -> list[dict]:
+        logger.info("Loading seed CSV file: %s", seed_file)
+        file_hash = seed_file_hash(seed_file)
+        targets = []
+        with seed_file.open("r", encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            missing_columns = {"niche", "link", "limit", "start_date"} - set(reader.fieldnames or [])
+            if missing_columns:
+                raise ValueError(f"Seed CSV missing required columns: {', '.join(sorted(missing_columns))}")
+            enabled_index = 0
+            for row_index, row in enumerate(reader, start=1):
+                enabled = str(row.get("enabled", "true")).strip().lower()
+                if enabled in {"0", "false", "no", "n"}:
+                    continue
+                enabled_index += 1
+                niche = (row.get("niche") or "douyin_food_restaurant").strip()
+                account_type = (row.get("account_type") or row.get("type") or default_account_type(niche)).strip()
+                account_id = (row.get("account_id") or row.get("id") or f"{account_type}_{enabled_index:03d}").strip()
+                link = (row.get("link") or "").strip()
+                if not link:
+                    logger.warning("Skipping CSV row %s because link is empty", row_index)
+                    continue
+                targets.append(
+                    {
+                        "niche": niche,
+                        "account_id": account_id,
+                        "account_type": account_type,
+                        "link": link,
+                        "mode": (row.get("mode") or "post").strip() or "post",
+                        "limit": int((row.get("limit") or "20").strip()),
+                        "start_time": (row.get("start_time") or row.get("start_date") or "").strip(),
+                        "end_time": (row.get("end_time") or row.get("end_date") or "").strip(),
+                        "seed_file_name": seed_file.name,
+                        "seed_file_path": str(seed_file),
+                        "seed_file_hash": file_hash,
+                    }
+                )
+        if not targets:
+            raise AirflowSkipException("Seed CSV file has no enabled rows with link")
+        logger.info("Loaded %s seed targets from CSV", len(targets))
+        return targets
+
+    def load_seed_targets_from_yaml(seed_file: Path) -> list[dict]:
+        logger.info("Loading seed YAML file: %s", seed_file)
         if not seed_file.exists():
             raise FileNotFoundError(f"Seed file not found: {seed_file}")
 
@@ -65,7 +184,7 @@ def crawl_douyin_seed_to_s3_landing():
             for account in seed_config.get("seed_accounts") or []
         ]
         if not targets:
-            raise AirflowSkipException("Seed file has no seed_accounts")
+            raise AirflowSkipException("Seed YAML file has no seed_accounts")
         logger.info("Loaded %s seed targets for niche=%s", len(targets), niche)
         return targets
 
@@ -286,7 +405,62 @@ def crawl_douyin_seed_to_s3_landing():
                 "account_id": account["account_id"],
             },
         )
-        return {"account_id": account["account_id"], "bucket": bucket, "key": key, "uri": f"s3://{bucket}/{key}", "bytes": len(body), "media_count": len(media_uploads)}
+        return {
+            "account_id": account["account_id"],
+            "bucket": bucket,
+            "key": key,
+            "uri": f"s3://{bucket}/{key}",
+            "bytes": len(body),
+            "media_count": len(media_uploads),
+            "seed_file_name": account.get("seed_file_name", ""),
+            "seed_file_path": account.get("seed_file_path", ""),
+            "seed_file_hash": account.get("seed_file_hash", ""),
+        }
+
+    @task(retries=0)
+    def write_seed_processing_manifest(landing_results: list[dict]) -> list[dict]:
+        if not landing_results:
+            raise AirflowSkipException("No landing results to mark as processed")
+
+        first = landing_results[0]
+        file_hash = str(first.get("seed_file_hash") or "").strip()
+        if not file_hash:
+            logger.info("Landing results did not come from CSV; skipping seed processing manifest")
+            return landing_results
+
+        bucket = os.getenv("S3_BUCKET", "").strip()
+        if not bucket:
+            raise AirflowSkipException("S3_BUCKET is not configured")
+
+        now = datetime.now(timezone.utc)
+        key = seed_manifest_key(file_hash)
+        manifest_payload = {
+            "pipeline": "de-e2e",
+            "source": "douyin",
+            "artifact": "processed_seed_file",
+            "status": "success",
+            "seed_file_name": first.get("seed_file_name", ""),
+            "seed_file_path": first.get("seed_file_path", ""),
+            "seed_file_hash": file_hash,
+            "processed_at": now.isoformat(),
+            "landing_result_count": len(landing_results),
+            "landing_uris": [result.get("uri") for result in landing_results if result.get("uri")],
+        }
+        body = json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        client = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION") or None)
+        logger.info("Writing seed processing manifest to s3://%s/%s", bucket, key)
+        client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json; charset=utf-8",
+            Metadata={
+                "artifact": "processed_seed_file",
+                "status": "success",
+                "seed_file_hash": file_hash,
+            },
+        )
+        return landing_results
 
     @task(retries=0)
     def crawl_seed_accounts() -> list[dict]:
@@ -297,6 +471,46 @@ def crawl_douyin_seed_to_s3_landing():
             results.append(write_landing(account, raw_response))
         return results
 
-    crawl_seed_accounts()
+    @task(retries=0)
+    def trigger_databricks_job(landing_results: list[dict]) -> dict:
+        host = os.getenv("DATABRICKS_HOST", "").strip().rstrip("/")
+        token = os.getenv("DATABRICKS_TOKEN", "").strip()
+        job_id = os.getenv("DATABRICKS_JOB_ID", "").strip()
+        if not host or not token or not job_id:
+            raise AirflowSkipException("DATABRICKS_HOST, DATABRICKS_TOKEN, or DATABRICKS_JOB_ID is not configured")
+
+        payload = {
+            "job_id": int(job_id) if job_id.isdigit() else job_id,
+            "idempotency_token": datetime.now(timezone.utc).strftime("douyin-%Y%m%dT%H%M%S%f"),
+            "job_parameters": {
+                "s3_bucket": os.getenv("S3_BUCKET", "").strip(),
+                "s3_landing_prefix": os.getenv("S3_LANDING_PREFIX", "lakehouse/landing/douyin/api_raw/json").strip().strip("/"),
+                "s3_media_manifest_prefix": os.getenv("S3_MEDIA_MANIFEST_PREFIX", "lakehouse/landing/douyin/media_manifest/json").strip().strip("/"),
+                "landing_result_count": str(len(landing_results)),
+            },
+        }
+        body = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            f"{host}/api/2.1/jobs/run-now",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        logger.info("Triggering Databricks job_id=%s after %s landing writes", job_id, len(landing_results))
+        with request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        return {
+            "job_id": job_id,
+            "run_id": result.get("run_id"),
+            "number_in_job": result.get("number_in_job"),
+            "run_page_url": result.get("run_page_url"),
+        }
+
+    landing_results = crawl_seed_accounts()
+    processed_results = write_seed_processing_manifest(landing_results)
+    trigger_databricks_job(processed_results)
 
 crawl_douyin_seed_to_s3_landing()

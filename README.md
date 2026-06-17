@@ -103,20 +103,61 @@ Ghi chú:
 
 ## Food Restaurant Seeds
 
-Seed niche hiện tại:
+Seed mặc định hiện dùng CSV để dễ nhập bằng Excel/Google Sheets:
 
 ```text
-seeds/douyin_food_restaurant_seeds.yml
+seeds/douyin_food_restaurant_seed_accounts.csv
 ```
 
-File này chứa:
+Cột tối thiểu người dùng cần nhập:
 
-- niche `douyin_food_restaurant`
-- keyword seed về ẩm thực/nhà hàng
-- 3 food creator links
-- crawl config mặc định: `mode=post`, `limit=50`, `start_time=2026-01-01`
+```text
+niche,link,limit,start_date
+```
 
-DAG `crawl_douyin_seed_to_s3_landing` đọc seed file, crawl từng account, rồi ghi mỗi account một file JSON vào S3 Landing.
+Người dùng nhập đúng 4 cột: `niche`, `link`, `limit`, `start_date`. DAG tự sinh phần còn lại:
+
+- `account_type`: ví dụ `douyin_food_restaurant` -> `food_creator`.
+- `account_id`: ví dụ `food_creator_001`, `food_creator_002` theo thứ tự dòng enabled.
+- `mode`: tự dùng `post`.
+- `limit`: ng??i d?ng nh?p; n?u tr?ng th? m?c ??nh `20`; `limit=0` ngh?a l?y t?t c? trang API tr? v?.
+- `start_date`: dùng `YYYY-MM-DD`; DAG map sang `start_time` khi gọi API.
+
+Validate CSV trước khi chạy DAG:
+
+```powershell
+python tools/validate_seed_csv.py seeds/douyin_food_restaurant_seed_accounts.csv
+```
+
+Ghi file normalized đầy đủ cột nếu cần:
+
+```powershell
+python tools/validate_seed_csv.py input.csv --write-normalized seeds/ready_to_run.csv
+```
+
+DAG `crawl_douyin_seed_to_s3_landing` t? t?m file CSV m?i nh?t trong `seeds/` theo pattern `*.csv`. N?u kh?ng c? CSV, DAG fallback v? YAML `seeds/douyin_food_restaurant_seeds.yml`.
+
+N?u mu?n ?p DAG ??c ??ng m?t file c? th?, set trong `.env`:
+
+```powershell
+AIRFLOW_DOUYIN_SEED_CSV_FILE=/opt/airflow/seeds/ten_file.csv
+```
+
+N?u ?? tr?ng `AIRFLOW_DOUYIN_SEED_CSV_FILE`, DAG t? ch?n file m?i nh?t theo:
+
+```powershell
+AIRFLOW_DOUYIN_SEED_CSV_DIR=/opt/airflow/seeds
+AIRFLOW_DOUYIN_SEED_CSV_PATTERN=*.csv
+```
+
+DAG t?nh SHA-256 cho n?i dung CSV v? ghi manifest success l?n S3 sau khi crawl xong:
+
+```text
+s3://your-lakehouse-bucket/lakehouse/control/douyin/processed_seed_files/{file_hash}.json
+```
+
+L?n ch?y sau, DAG b? qua CSV ?? c? manifest success v? ch?n CSV m?i nh?t ch?a x? l?. Mu?n ch?y l?i CSV c?, s?a n?i dung file ho?c x?a manifest control t??ng ?ng tr?n S3.
+
 ## AWS S3 Data Lake
 
 Cấu hình trong `.env`:
@@ -129,6 +170,7 @@ S3_BUCKET=your-lakehouse-bucket
 S3_LANDING_PREFIX=lakehouse/landing/douyin/api_raw/json
 S3_MEDIA_PREFIX=lakehouse/landing/douyin/media_raw
 S3_MEDIA_MANIFEST_PREFIX=lakehouse/landing/douyin/media_manifest/json
+S3_CONTROL_PREFIX=lakehouse/control/douyin/processed_seed_files
 DOUYIN_DOWNLOAD_MEDIA=true
 ```
 
@@ -193,7 +235,25 @@ Flow Databricks bước sau:
 S3 landing JSON -> Databricks Job -> Bronze Delta -> Silver Delta -> Gold Delta
 ```
 
-Airflow sau này sẽ trigger Databricks Job bằng `apache-airflow-providers-databricks`.
+Airflow trigger Databricks Job bằng Jobs REST API sau khi crawl xong. Nếu `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, hoặc `DATABRICKS_JOB_ID` trống thì task Databricks sẽ skip, dữ liệu S3 vẫn đã ghi xong.
+
+## Airflow Trigger Databricks
+
+Cấu hình trong `.env`:
+
+```powershell
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=your-personal-access-token
+DATABRICKS_JOB_ID=123456789
+```
+
+Flow chạy chính:
+
+```text
+seed_accounts.yml -> Airflow crawl -> S3 Landing/Media -> Databricks Job -> Bronze/Silver/Gold Delta
+```
+
+Nhận file CSV từ nhóm người dùng, copy vào thư mục `seeds/`, rồi trigger DAG `crawl_douyin_seed_to_s3_landing`. DAG sẽ chọn CSV mới nhất theo thời gian sửa file.
 
 ## DAGs
 
