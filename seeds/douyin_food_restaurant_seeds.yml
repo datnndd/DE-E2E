@@ -2,19 +2,6 @@
 name: Douyin Food & Restaurant Trend Intelligence
 description: Track food and restaurant creator activity trends on Douyin.
 
-keywords:
-  - 美食
-  - 探店
-  - 餐厅推荐
-  - 小吃
-  - 火锅
-  - 咖啡
-  - 甜品
-  - 夜市
-  - 上海美食
-  - 成都美食
-  - 北京美食
-
 seed_accounts:
   - id: food_creator_001
     type: food_creator

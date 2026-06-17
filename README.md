@@ -17,7 +17,7 @@ Apache Airflow chạy bằng Docker Compose trong container riêng để điều
 - `ingestion-worker/Dockerfile`: Python runtime, dependencies và app command của ingestion worker.
 - `docker-compose.yml`: nối service, network, ports, volumes, healthcheck và runtime secrets.
 
-Không đưa `AWS_SECRET_ACCESS_KEY` hoặc `DOUYIN_COOKIE` vào Dockerfile vì secret sẽ bị bake vào image. Compose inject biến này lúc chạy.
+Không đưa `AWS_SECRET_ACCESS_KEY` hoặc Douyin cookie tokens vào Dockerfile vì secret sẽ bị bake vào image. Compose inject biến này lúc chạy.
 
 ## Khởi Chạy
 
@@ -81,7 +81,13 @@ Cấu hình trong `.env`:
 
 ```powershell
 DOUYIN_LINK=https://www.douyin.com/user/...
-DOUYIN_COOKIE="msToken=...; ttwid=...; odin_tt=...; passport_csrf_token=...; sid_guard=...;"
+DOUYIN_MSTOKEN=...
+DOUYIN_TTWID=...
+DOUYIN_ODIN_TT=...
+DOUYIN_PASSPORT_CSRF_TOKEN=...
+DOUYIN_SID_GUARD=...
+DOUYIN_SESSIONID=...
+DOUYIN_SID_TT=...
 DOUYIN_MODE=post
 DOUYIN_LIMIT=20
 DOUYIN_START_TIME=2026-01-01
@@ -222,3 +228,4 @@ Xóa cả metadata database khi cần reset sạch:
 ```powershell
 docker compose down -v
 ```
+

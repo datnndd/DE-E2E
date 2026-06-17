@@ -43,7 +43,6 @@ COMMON_PARAMS: dict[str, str | int] = {
     "round_trip_time": "50",
 }
 
-
 @dataclass(frozen=True)
 class DouyinTarget:
     target_type: str
@@ -180,6 +179,7 @@ class DouyinClient:
         response.raise_for_status()
         return response.json()
 
+
     @staticmethod
     def _append_filtered(awemes: list[dict[str, Any]], batch: list[dict[str, Any]], limit: int, start_date: str, end_date: str) -> None:
         for aweme in batch:
@@ -223,15 +223,10 @@ class DouyinClient:
     def _headers(cookie: str | None) -> dict[str, str]:
         headers = {
             "User-Agent": USER_AGENT,
-            "referer": "https://www.douyin.com/",
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-origin",
+            "Referer": "https://www.douyin.com/?recommend=1",
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate",
+            "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
         }
         headers["Cookie"] = cookie or f"msToken={generate_random_str(107)}"
         return headers

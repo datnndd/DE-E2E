@@ -38,7 +38,7 @@ MEDIA_EXTENSIONS = {
     tags=["douyin", "food", "seed", "s3", "landing"],
 )
 def crawl_douyin_seed_to_s3_landing():
-    def load_seed_accounts() -> list[dict]:
+    def load_seed_targets() -> list[dict]:
         seed_file = Path(os.getenv("DOUYIN_SEED_FILE", "/opt/airflow/seeds/douyin_food_restaurant_seeds.yml"))
         logger.info("Loading seed file: %s", seed_file)
         if not seed_file.exists():
@@ -47,44 +47,41 @@ def crawl_douyin_seed_to_s3_landing():
         seed_config = yaml.safe_load(seed_file.read_text(encoding="utf-8-sig"))
         crawl_config = seed_config.get("crawl_config") or {}
         niche = seed_config.get("niche", "unknown_niche")
-        accounts = seed_config.get("seed_accounts") or []
-        if not accounts:
-            raise AirflowSkipException("Seed file has no seed_accounts")
+        limit = int(crawl_config.get("limit", 20))
+        start_time = crawl_config.get("start_time", "")
+        end_time = crawl_config.get("end_time", "")
 
-        seed_accounts = [
+        targets = [
             {
                 "niche": niche,
                 "account_id": account["id"],
                 "account_type": account.get("type", "unknown"),
                 "link": account["link"],
                 "mode": crawl_config.get("mode", "post"),
-                "limit": int(crawl_config.get("limit", 20)),
-                "start_time": crawl_config.get("start_time", ""),
-                "end_time": crawl_config.get("end_time", ""),
+                "limit": limit,
+                "start_time": start_time,
+                "end_time": end_time,
             }
-            for account in accounts
+            for account in seed_config.get("seed_accounts") or []
         ]
-        logger.info("Loaded %s seed accounts for niche=%s", len(seed_accounts), niche)
-        return seed_accounts
+        if not targets:
+            raise AirflowSkipException("Seed file has no seed_accounts")
+        logger.info("Loaded %s seed targets for niche=%s", len(targets), niche)
+        return targets
 
-    def crawl_account(account: dict) -> dict:
+    def crawl_target(target: dict) -> dict:
         worker_url = os.getenv("INGESTION_WORKER_URL", "http://ingestion-worker:8000").rstrip("/")
-        payload = json.dumps(
-            {
-                "link": account["link"],
-                "mode": account["mode"],
-                "limit": account["limit"],
-                "start_time": account["start_time"],
-                "end_time": account["end_time"],
-            }
-        ).encode("utf-8")
-        req = request.Request(
-            f"{worker_url}/douyin/fetch",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        logger.info("Calling ingestion-worker for account_id=%s", account["account_id"])
+        endpoint = f"{worker_url}/douyin/fetch"
+        payload_dict = {
+            "link": target["link"],
+            "mode": target["mode"],
+            "limit": target["limit"],
+            "start_time": target["start_time"],
+            "end_time": target["end_time"],
+        }
+        payload = json.dumps(payload_dict).encode("utf-8")
+        req = request.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        logger.info("Calling ingestion-worker account_id=%s", target["account_id"])
         with request.urlopen(req, timeout=300) as response:
             return json.loads(response.read().decode("utf-8"))
 
@@ -264,7 +261,7 @@ def crawl_douyin_seed_to_s3_landing():
             "niche": account["niche"],
             "account_id": account["account_id"],
             "account_type": account["account_type"],
-            "link": account["link"],
+            "link": account.get("link", ""),
             "crawl_config": {
                 "mode": account["mode"],
                 "limit": account["limit"],
@@ -294,9 +291,9 @@ def crawl_douyin_seed_to_s3_landing():
     @task(retries=0)
     def crawl_seed_accounts() -> list[dict]:
         results = []
-        for account in load_seed_accounts():
-            logger.info("Processing account_id=%s link=%s", account["account_id"], account["link"])
-            raw_response = crawl_account(account)
+        for account in load_seed_targets():
+            logger.info("Processing account_id=%s", account["account_id"])
+            raw_response = crawl_target(account)
             results.append(write_landing(account, raw_response))
         return results
 
