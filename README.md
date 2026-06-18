@@ -247,6 +247,19 @@ DATABRICKS_TOKEN=your-personal-access-token
 DATABRICKS_JOB_ID=123456789
 ```
 
+Airflow truy?n c?c job parameters sau sang Databricks:
+
+```text
+s3_bucket
+s3_landing_prefix
+s3_media_manifest_prefix
+landing_uris_json
+media_manifest_uris_json
+seed_file_hash
+```
+
+Bronze notebooks dùng `landing_uris_json` và `media_manifest_uris_json` để chỉ đọc các file S3 vừa được Airflow ghi trong lần chạy đó. Nếu chạy notebook thủ công mà các parameter này trống, notebook fallback đọc toàn bộ prefix để debug/backfill.
+
 Flow chạy chính:
 
 ```text

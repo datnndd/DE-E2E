@@ -14,8 +14,10 @@ from airflow.sdk import dag, task
     tags=["orchestration", "healthcheck"],
 )
 def orchestration_healthcheck():
+    # Healthcheck task: proves scheduler, worker process, and task runtime work.
     @task(retries=1)
     def ping() -> str:
+        """Return a small success message for Airflow runtime checks."""
         return "airflow orchestration ready"
 
     ping()

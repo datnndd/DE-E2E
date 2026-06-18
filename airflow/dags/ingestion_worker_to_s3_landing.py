@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from urllib import request
 
 import boto3
-from airflow.sdk.exceptions import AirflowSkipException
 from airflow.sdk import dag, task
+from airflow.sdk.exceptions import AirflowSkipException
 
 
 @dag(
@@ -19,14 +19,22 @@ from airflow.sdk import dag, task
     tags=["orchestration", "douyin", "s3", "landing", "raw"],
 )
 def ingestion_worker_to_s3_landing():
+    # ---------------------------------------------------------------------
+    # Step 1: Extract raw payload from ingestion-worker.
+    # ---------------------------------------------------------------------
     @task(retries=2)
     def fetch_payload() -> dict:
+        """Call ingestion-worker /data endpoint and return raw transfer payload."""
         worker_url = os.getenv("INGESTION_WORKER_URL", "http://ingestion-worker:8000").rstrip("/")
         with request.urlopen(f"{worker_url}/data", timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    # ---------------------------------------------------------------------
+    # Step 2: Load payload into S3 Landing.
+    # ---------------------------------------------------------------------
     @task(retries=2)
     def write_landing(payload: dict) -> dict:
+        """Write one transfer payload to S3 Landing as raw JSON."""
         bucket = os.getenv("S3_BUCKET", "").strip()
         if not bucket:
             raise AirflowSkipException("S3_BUCKET is not configured")
@@ -34,10 +42,7 @@ def ingestion_worker_to_s3_landing():
         prefix = os.getenv("S3_LANDING_PREFIX", "lakehouse/landing/douyin/api_raw/json").strip().strip("/")
         now = datetime.now(timezone.utc)
         run_id = str(payload.get("run_id") or now.strftime("%Y%m%dT%H%M%S%f"))
-        key = (
-            f"{prefix}/year={now:%Y}/month={now:%m}/day={now:%d}/"
-            f"{run_id}.json"
-        )
+        key = f"{prefix}/year={now:%Y}/month={now:%m}/day={now:%d}/{run_id}.json"
 
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         client = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION") or None)
