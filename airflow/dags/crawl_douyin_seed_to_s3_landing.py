@@ -10,9 +10,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import request
+from urllib import error, request
 
 import boto3
+from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
 from airflow.sdk import dag, task
 from airflow.sdk.exceptions import AirflowSkipException
 
@@ -60,8 +62,21 @@ def crawl_douyin_seed_to_s3_landing():
             return default
 
     def s3_client():
-        """Create an S3 client using the configured AWS region."""
-        return boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION") or None)
+        """Create an S3 client using the configured AWS region and connection pool."""
+        return boto3.client(
+            "s3",
+            region_name=os.getenv("AWS_DEFAULT_REGION") or None,
+            config=Config(max_pool_connections=max(10, env_int("S3_MAX_POOL_CONNECTIONS", 64))),
+        )
+
+    def s3_transfer_config() -> TransferConfig:
+        """Limit per-file multipart concurrency because media downloads already run in parallel."""
+        return TransferConfig(
+            max_concurrency=max(1, env_int("S3_UPLOAD_MAX_CONCURRENCY", 2)),
+            multipart_threshold=max(8 * 1024 * 1024, env_int("S3_MULTIPART_THRESHOLD", 32 * 1024 * 1024)),
+            multipart_chunksize=max(8 * 1024 * 1024, env_int("S3_MULTIPART_CHUNKSIZE", 32 * 1024 * 1024)),
+            use_threads=True,
+        )
 
     def s3_prefix(name: str, default: str) -> str:
         """Read an S3 prefix and normalize leading/trailing slashes."""
@@ -74,6 +89,33 @@ def crawl_douyin_seed_to_s3_landing():
         req = request.Request(url, data=body, headers=request_headers, method=method)
         with request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def request_json_with_retry(
+        url: str,
+        method: str = "GET",
+        payload: dict | None = None,
+        headers: dict | None = None,
+        timeout: int = 60,
+        retry_times: int = 3,
+        retry_backoff_seconds: int = 10,
+    ) -> dict:
+        """Retry transient HTTP 5xx JSON requests."""
+        last_error = None
+        for attempt in range(1, retry_times + 1):
+            try:
+                return request_json(url, method=method, payload=payload, headers=headers, timeout=timeout)
+            except error.HTTPError as exc:
+                last_error = exc
+                if exc.code < 500 or attempt == retry_times:
+                    raise
+                logger.warning("HTTP request failed attempt=%s status=%s url=%s", attempt, exc.code, url)
+            except Exception as exc:
+                last_error = exc
+                if attempt == retry_times:
+                    raise
+                logger.warning("HTTP request failed attempt=%s url=%s error=%s", attempt, url, exc)
+            time.sleep(retry_backoff_seconds * attempt)
+        raise RuntimeError(f"HTTP request failed after {retry_times} attempts: {last_error}")
 
     # -------------------------------------------------------------------------
     # Seed file discovery and processed-state control
@@ -224,22 +266,26 @@ def crawl_douyin_seed_to_s3_landing():
             "end_time": target["end_time"],
         }
         logger.info("Calling ingestion-worker account_id=%s", target["account_id"])
-        return request_json(endpoint, method="POST", payload=payload_dict, timeout=300)
+        return request_json_with_retry(
+            endpoint,
+            method="POST",
+            payload=payload_dict,
+            timeout=300,
+            retry_times=max(1, env_int("INGESTION_WORKER_FETCH_RETRY_TIMES", 3)),
+            retry_backoff_seconds=max(1, env_int("INGESTION_WORKER_FETCH_RETRY_BACKOFF_SECONDS", 30)),
+        )
 
     # -------------------------------------------------------------------------
     # Media extraction from raw Douyin response
     # -------------------------------------------------------------------------
     def media_urls(url_list: list | None) -> list[str]:
-        """Return unique downloadable URLs from Douyin url_list objects."""
+        """Return only the primary Douyin media URL."""
         if not isinstance(url_list, list):
             return []
-        seen = set()
-        urls = []
         for url in url_list:
-            if isinstance(url, str) and url and url not in seen:
-                seen.add(url)
-                urls.append(url)
-        return urls
+            if isinstance(url, str) and url:
+                return [url]
+        return []
 
     def extract_aweme_list(raw_response: dict) -> list[dict]:
         """Normalize detail/list responses into a list of aweme objects."""
@@ -302,7 +348,7 @@ def crawl_douyin_seed_to_s3_landing():
             bytes_written = 0
             content_type = response.headers.get("Content-Type")
 
-            with file_path.open(mode + "b") as file:
+            with file_path.open(mode) as file:
                 while True:
                     chunk = response.read(chunk_size)
                     if not chunk:
@@ -349,11 +395,16 @@ def crawl_douyin_seed_to_s3_landing():
             return f"{account_prefix}/user_avatar_{media['index']}.{extension}"
         return f"{account_prefix}/{media['aweme_id']}_{media_type}_{media['index']}.{extension}"
 
-    def upload_single_media(client, bucket: str, account: dict, media_prefix: str, media: dict) -> dict:
+    def media_task_id(media: dict) -> str:
+        """Build stable ID for one aweme media task."""
+        return f"{media['aweme_id']}::{media['media_type']}::{media['index']}"
+
+    def upload_single_media(client, bucket: str, account: dict, media_prefix: str, media: dict, retry_round: int = 0) -> dict:
         """Download one media object to temp file, upload to S3, return manifest row."""
         media_type = media["media_type"]
         source_url = (media.get("urls") or [None])[0]
         key = build_media_key(media_prefix, account, media)
+        task_id = media_task_id(media)
         temp_path = None
         try:
             extension = MEDIA_EXTENSIONS.get(media_type, "bin")
@@ -376,6 +427,7 @@ def crawl_douyin_seed_to_s3_landing():
                         "media_type": media_type,
                     },
                 },
+                Config=s3_transfer_config(),
             )
             file_size = temp_path.stat().st_size
             s3_url = f"s3://{bucket}/{key}"
@@ -391,6 +443,8 @@ def crawl_douyin_seed_to_s3_landing():
                 "content_type": content_type,
                 "source_url": source_url,
                 "candidate_url_count": len(media.get("urls") or []),
+                "media_task_id": task_id,
+                "retry_round": retry_round,
             }
         except Exception as exc:
             logger.warning("Media upload failed media_type=%s aweme_id=%s error=%s", media_type, media["aweme_id"], exc)
@@ -403,6 +457,8 @@ def crawl_douyin_seed_to_s3_landing():
                 "source_url": source_url,
                 "candidate_url_count": len(media.get("urls") or []),
                 "partial_bytes": temp_path.stat().st_size if temp_path and temp_path.exists() else 0,
+                "media_task_id": task_id,
+                "retry_round": retry_round,
                 "error": str(exc),
             }
         finally:
@@ -423,14 +479,63 @@ def crawl_douyin_seed_to_s3_landing():
         workers = min(workers, len(media_tasks) or 1)
         logger.info("Preparing parallel media download for %s awemes, %s media, workers=%s", len(awemes), len(media_tasks), workers)
 
-        uploaded = []
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(upload_single_media, client, bucket, account, media_prefix, media) for media in media_tasks]
-            for future in as_completed(futures):
-                uploaded.append(future.result())
+        uploaded = upload_media_batch(client, bucket, account, media_prefix, media_tasks, workers, retry_round=0)
+        uploaded = retry_failed_media(client, bucket, account, media_prefix, media_tasks, uploaded, workers)
 
-        logger.info("Processed %s media objects", len(uploaded))
+        status_counts = {}
+        for item in uploaded:
+            status_counts[item.get("status", "unknown")] = status_counts.get(item.get("status", "unknown"), 0) + 1
+        logger.info("Processed %s media objects status_counts=%s", len(uploaded), status_counts)
         return uploaded
+
+    def upload_media_batch(
+        client,
+        bucket: str,
+        account: dict,
+        media_prefix: str,
+        media_tasks: list[dict],
+        workers: int,
+        retry_round: int,
+    ) -> list[dict]:
+        """Upload a batch of media tasks in parallel."""
+        if not media_tasks:
+            return []
+        results = []
+        with ThreadPoolExecutor(max_workers=min(workers, len(media_tasks))) as executor:
+            futures = [
+                executor.submit(upload_single_media, client, bucket, account, media_prefix, media, retry_round)
+                for media in media_tasks
+            ]
+            for future in as_completed(futures):
+                results.append(future.result())
+        return results
+
+    def retry_failed_media(
+        client,
+        bucket: str,
+        account: dict,
+        media_prefix: str,
+        original_tasks: list[dict],
+        first_results: list[dict],
+        workers: int,
+    ) -> list[dict]:
+        """Retry failed media immediately before writing the account manifest."""
+        retry_rounds = max(0, env_int("DOUYIN_MEDIA_FAILED_RETRY_ROUNDS", 1))
+        latest_results = {result["media_task_id"]: result for result in first_results}
+        original_by_id = {media_task_id(media): media for media in original_tasks}
+
+        for retry_round in range(1, retry_rounds + 1):
+            failed_ids = [task_id for task_id, result in latest_results.items() if result.get("status") != "uploaded"]
+            if not failed_ids:
+                break
+
+            failed_tasks = [original_by_id[task_id] for task_id in failed_ids if task_id in original_by_id]
+            logger.info("Retrying %s failed media objects retry_round=%s", len(failed_tasks), retry_round)
+            retry_results = upload_media_batch(client, bucket, account, media_prefix, failed_tasks, workers, retry_round)
+            for result in retry_results:
+                latest_results[result["media_task_id"]] = result
+
+        return list(latest_results.values())
 
     # -------------------------------------------------------------------------
     # S3 Landing writers

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -15,6 +16,8 @@ from urllib3.util.retry import Retry
 from douyin.abogus import ABogus
 from douyin.urls import Urls
 from douyin.xbogus import USER_AGENT, XBogus, generate_random_str
+
+logger = logging.getLogger(__name__)
 
 COMMON_PARAMS: dict[str, str | int] = {
     "device_platform": "webapp",
@@ -175,8 +178,21 @@ class DouyinClient:
         else:
             query = payload
 
-        response = self.session.get(f"{endpoint}{query}", timeout=self.timeout)
-        response.raise_for_status()
+        url = f"{endpoint}{query}"
+        response = self.session.get(url, timeout=self.timeout)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            logger.warning(
+                "Douyin API HTTP error status=%s endpoint=%s response=%s",
+                response.status_code,
+                endpoint,
+                response.text[:500],
+            )
+            raise requests.HTTPError(
+                f"Douyin API HTTP {response.status_code} endpoint={endpoint} response={response.text[:500]}",
+                response=response,
+            ) from exc
         return response.json()
 
 

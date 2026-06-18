@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from douyin_client import DouyinClient
+
+logger = logging.getLogger(__name__)
 
 
 class FetchRequest(BaseModel):
@@ -66,6 +69,7 @@ def fetch_douyin(request: FetchRequest) -> dict[str, Any]:
             end_time=request.end_time,
         )
     except Exception as exc:
+        logger.exception("Douyin fetch failed link=%s mode=%s limit=%s", link, request.mode, request.limit)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
