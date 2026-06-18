@@ -5,12 +5,14 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import request
 
 import boto3
-import yaml
 from airflow.sdk import dag, task
 from airflow.sdk.exceptions import AirflowSkipException
 
@@ -48,6 +50,15 @@ def crawl_douyin_seed_to_s3_landing():
         """Read an environment variable and trim whitespace."""
         return os.getenv(name, default).strip()
 
+    def env_int(name: str, default: int) -> int:
+        """Read a positive integer environment variable."""
+        value = env_str(name, str(default))
+        try:
+            return int(value)
+        except ValueError:
+            logger.warning("Invalid integer env %s=%s; using default=%s", name, value, default)
+            return default
+
     def s3_client():
         """Create an S3 client using the configured AWS region."""
         return boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION") or None)
@@ -56,16 +67,23 @@ def crawl_douyin_seed_to_s3_landing():
         """Read an S3 prefix and normalize leading/trailing slashes."""
         return env_str(name, default).strip("/")
 
+    def request_json(url: str, method: str = "GET", payload: dict | None = None, headers: dict | None = None, timeout: int = 60) -> dict:
+        """Send an HTTP request and parse a JSON response."""
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request_headers = {"Content-Type": "application/json", **(headers or {})}
+        req = request.Request(url, data=body, headers=request_headers, method=method)
+        with request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
     # -------------------------------------------------------------------------
     # Seed file discovery and processed-state control
     # -------------------------------------------------------------------------
     def load_seed_targets() -> list[dict]:
-        """Load crawl targets from latest unprocessed CSV; fallback to YAML."""
+        """Load crawl targets from the latest unprocessed CSV file."""
         csv_file = discover_seed_csv_file()
-        yaml_file = Path(env_str("DOUYIN_SEED_FILE", "/opt/airflow/seeds/douyin_food_restaurant_seeds.yml"))
-        if csv_file:
-            return load_seed_targets_from_csv(csv_file)
-        return load_seed_targets_from_yaml(yaml_file)
+        if not csv_file:
+            raise AirflowSkipException("No seed CSV file found to process")
+        return load_seed_targets_from_csv(csv_file)
 
     def discover_seed_csv_file() -> Path | None:
         """Find the explicit CSV file or latest unprocessed CSV in the seed folder."""
@@ -191,37 +209,6 @@ def crawl_douyin_seed_to_s3_landing():
         logger.info("Loaded %s seed targets from CSV", len(targets))
         return targets
 
-    def load_seed_targets_from_yaml(seed_file: Path) -> list[dict]:
-        """Read legacy YAML seed file as fallback when no CSV exists."""
-        logger.info("Loading seed YAML file: %s", seed_file)
-        if not seed_file.exists():
-            raise FileNotFoundError(f"Seed file not found: {seed_file}")
-
-        seed_config = yaml.safe_load(seed_file.read_text(encoding="utf-8-sig"))
-        crawl_config = seed_config.get("crawl_config") or {}
-        niche = seed_config.get("niche", "unknown_niche")
-        limit = int(crawl_config.get("limit", 20))
-        start_time = crawl_config.get("start_time", "")
-        end_time = crawl_config.get("end_time", "")
-
-        targets = [
-            {
-                "niche": niche,
-                "account_id": account["id"],
-                "account_type": account.get("type", "unknown"),
-                "link": account["link"],
-                "mode": crawl_config.get("mode", "post"),
-                "limit": limit,
-                "start_time": start_time,
-                "end_time": end_time,
-            }
-            for account in seed_config.get("seed_accounts") or []
-        ]
-        if not targets:
-            raise AirflowSkipException("Seed YAML file has no seed_accounts")
-        logger.info("Loaded %s seed targets for niche=%s", len(targets), niche)
-        return targets
-
     # -------------------------------------------------------------------------
     # Ingestion-worker API calls
     # -------------------------------------------------------------------------
@@ -236,20 +223,23 @@ def crawl_douyin_seed_to_s3_landing():
             "start_time": target["start_time"],
             "end_time": target["end_time"],
         }
-        payload = json.dumps(payload_dict).encode("utf-8")
-        req = request.Request(endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         logger.info("Calling ingestion-worker account_id=%s", target["account_id"])
-        with request.urlopen(req, timeout=300) as response:
-            return json.loads(response.read().decode("utf-8"))
+        return request_json(endpoint, method="POST", payload=payload_dict, timeout=300)
 
     # -------------------------------------------------------------------------
     # Media extraction from raw Douyin response
     # -------------------------------------------------------------------------
-    def first_url(url_list: list | None) -> str | None:
-        """Return the first URL from Douyin url_list objects."""
-        if isinstance(url_list, list) and url_list:
-            return url_list[0]
-        return None
+    def media_urls(url_list: list | None) -> list[str]:
+        """Return unique downloadable URLs from Douyin url_list objects."""
+        if not isinstance(url_list, list):
+            return []
+        seen = set()
+        urls = []
+        for url in url_list:
+            if isinstance(url, str) and url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+        return urls
 
     def extract_aweme_list(raw_response: dict) -> list[dict]:
         """Normalize detail/list responses into a list of aweme objects."""
@@ -265,34 +255,90 @@ def crawl_douyin_seed_to_s3_landing():
         tasks = []
         aweme_id = str(aweme.get("aweme_id") or aweme.get("group_id") or "unknown_aweme")
 
-        video_url = first_url(aweme.get("video", {}).get("play_addr", {}).get("url_list", []))
-        if video_url:
-            tasks.append({"aweme_id": aweme_id, "media_type": "video", "index": 0, "url": video_url})
+        video_urls = media_urls(aweme.get("video", {}).get("play_addr", {}).get("url_list", []))
+        if video_urls:
+            tasks.append({"aweme_id": aweme_id, "media_type": "video", "index": 0, "urls": video_urls})
 
-        cover_url = first_url(aweme.get("video", {}).get("cover", {}).get("url_list", []))
-        if cover_url:
-            tasks.append({"aweme_id": aweme_id, "media_type": "cover", "index": 0, "url": cover_url})
+        cover_urls = media_urls(aweme.get("video", {}).get("cover", {}).get("url_list", []))
+        if cover_urls:
+            tasks.append({"aweme_id": aweme_id, "media_type": "cover", "index": 0, "urls": cover_urls})
 
         for index, image in enumerate(aweme.get("images") or []):
-            image_url = first_url(image.get("url_list") or image.get("download_url_list") or [])
-            if image_url:
-                tasks.append({"aweme_id": aweme_id, "media_type": "image", "index": index, "url": image_url})
+            image_urls = media_urls(image.get("url_list") or image.get("download_url_list") or [])
+            if image_urls:
+                tasks.append({"aweme_id": aweme_id, "media_type": "image", "index": index, "urls": image_urls})
 
-        avatar_url = first_url(aweme.get("author", {}).get("avatar_thumb", {}).get("url_list", []))
-        if avatar_url:
-            tasks.append({"aweme_id": aweme_id, "media_type": "avatar", "index": 0, "url": avatar_url})
+        avatar_urls = media_urls(aweme.get("author", {}).get("avatar_thumb", {}).get("url_list", []))
+        if avatar_urls:
+            tasks.append({"aweme_id": aweme_id, "media_type": "avatar", "index": 0, "urls": avatar_urls})
 
         return tasks
 
-    def download_binary(url: str) -> tuple[bytes, str | None]:
-        """Download a media URL while it is still valid."""
+    def media_headers(extra_headers: dict | None = None) -> dict:
+        """Build headers for Douyin media download."""
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Referer": "https://www.douyin.com/",
         }
-        req = request.Request(url, headers=headers, method="GET")
-        with request.urlopen(req, timeout=180) as response:
-            return response.read(), response.headers.get("Content-Type")
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
+
+    def download_url_to_file(url: str, file_path: Path) -> tuple[str | None, str]:
+        """Stream one URL to a temp file, resuming partial bytes when possible."""
+        timeout = max(1, env_int("DOUYIN_MEDIA_DOWNLOAD_TIMEOUT", 180))
+        chunk_size = max(8192, env_int("DOUYIN_MEDIA_CHUNK_SIZE", 1024 * 1024))
+        existing_size = file_path.stat().st_size if file_path.exists() else 0
+        extra_headers = {"Range": f"bytes={existing_size}-"} if existing_size > 0 else None
+        req = request.Request(url, headers=media_headers(extra_headers), method="GET")
+
+        with request.urlopen(req, timeout=timeout) as response:
+            status_code = getattr(response, "status", response.getcode())
+            if status_code not in {200, 206}:
+                raise RuntimeError(f"HTTP {status_code}")
+
+            mode = "ab" if existing_size > 0 and status_code == 206 else "wb"
+            expected_remaining = int(response.headers.get("Content-Length") or 0)
+            bytes_written = 0
+            content_type = response.headers.get("Content-Type")
+
+            with file_path.open(mode + "b") as file:
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    file.write(chunk)
+                    bytes_written += len(chunk)
+
+            if expected_remaining and bytes_written < expected_remaining:
+                raise RuntimeError(f"IncompleteRead({bytes_written} bytes read, {expected_remaining - bytes_written} more expected)")
+
+            return content_type, url
+
+    def download_media_file(urls: list[str], file_path: Path) -> tuple[str | None, str]:
+        """Download media with retries, fallback URLs, and resume support."""
+        retry_times = max(1, env_int("DOUYIN_MEDIA_RETRY_TIMES", 3))
+        backoff_seconds = max(0, env_int("DOUYIN_MEDIA_RETRY_BACKOFF_SECONDS", 2))
+        last_error = None
+
+        for attempt in range(1, retry_times + 1):
+            for url in urls:
+                try:
+                    return download_url_to_file(url, file_path)
+                except Exception as exc:
+                    last_error = exc
+                    current_size = file_path.stat().st_size if file_path.exists() else 0
+                    logger.warning(
+                        "Media download attempt=%s failed partial_bytes=%s url=%s error=%s",
+                        attempt,
+                        current_size,
+                        url,
+                        exc,
+                    )
+            if attempt < retry_times and backoff_seconds > 0:
+                time.sleep(backoff_seconds * attempt)
+
+        raise RuntimeError(f"Media download failed after {retry_times} attempts: {last_error}")
 
     def build_media_key(media_prefix: str, account: dict, media: dict) -> str:
         """Build deterministic S3 key for a downloaded media object."""
@@ -303,65 +349,85 @@ def crawl_douyin_seed_to_s3_landing():
             return f"{account_prefix}/user_avatar_{media['index']}.{extension}"
         return f"{account_prefix}/{media['aweme_id']}_{media_type}_{media['index']}.{extension}"
 
+    def upload_single_media(client, bucket: str, account: dict, media_prefix: str, media: dict) -> dict:
+        """Download one media object to temp file, upload to S3, return manifest row."""
+        media_type = media["media_type"]
+        source_url = (media.get("urls") or [None])[0]
+        key = build_media_key(media_prefix, account, media)
+        temp_path = None
+        try:
+            extension = MEDIA_EXTENSIONS.get(media_type, "bin")
+            with tempfile.NamedTemporaryFile(prefix="douyin_media_", suffix=f".{extension}", delete=False) as temp_file:
+                temp_path = Path(temp_file.name)
+
+            detected_content_type, source_url = download_media_file(media["urls"], temp_path)
+            content_type = detected_content_type or MEDIA_CONTENT_TYPES.get(media_type, "application/octet-stream")
+            client.upload_file(
+                str(temp_path),
+                bucket,
+                key,
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "Metadata": {
+                        "source": "douyin",
+                        "niche": account["niche"],
+                        "account_id": account["account_id"],
+                        "aweme_id": media["aweme_id"],
+                        "media_type": media_type,
+                    },
+                },
+            )
+            file_size = temp_path.stat().st_size
+            s3_url = f"s3://{bucket}/{key}"
+            return {
+                "status": "uploaded",
+                "account_id": account["account_id"],
+                "aweme_id": media["aweme_id"],
+                "media_type": media_type,
+                "index": media["index"],
+                "s3_key": key,
+                "s3_url": s3_url,
+                "bytes": file_size,
+                "content_type": content_type,
+                "source_url": source_url,
+                "candidate_url_count": len(media.get("urls") or []),
+            }
+        except Exception as exc:
+            logger.warning("Media upload failed media_type=%s aweme_id=%s error=%s", media_type, media["aweme_id"], exc)
+            return {
+                "status": "failed",
+                "account_id": account["account_id"],
+                "aweme_id": media["aweme_id"],
+                "media_type": media_type,
+                "index": media["index"],
+                "source_url": source_url,
+                "candidate_url_count": len(media.get("urls") or []),
+                "partial_bytes": temp_path.stat().st_size if temp_path and temp_path.exists() else 0,
+                "error": str(exc),
+            }
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
     def upload_aweme_media(client, bucket: str, account: dict, raw_response: dict) -> list[dict]:
-        """Download media from raw response and upload files to S3."""
+        """Download media from raw response and upload files to S3 in parallel."""
         if env_str("DOUYIN_DOWNLOAD_MEDIA", "true").lower() not in {"1", "true", "yes"}:
             logger.info("Media download disabled by DOUYIN_DOWNLOAD_MEDIA")
             return []
 
         media_prefix = s3_prefix("S3_MEDIA_PREFIX", "lakehouse/landing/douyin/media_raw")
-        uploaded = []
         awemes = extract_aweme_list(raw_response)
-        logger.info("Preparing media download for %s awemes", len(awemes))
+        media_tasks = [media for aweme in awemes for media in extract_media_tasks(aweme)]
 
-        for aweme in awemes:
-            for media in extract_media_tasks(aweme):
-                media_type = media["media_type"]
-                key = build_media_key(media_prefix, account, media)
-                try:
-                    body, detected_content_type = download_binary(media["url"])
-                    content_type = detected_content_type or MEDIA_CONTENT_TYPES.get(media_type, "application/octet-stream")
-                    client.put_object(
-                        Bucket=bucket,
-                        Key=key,
-                        Body=body,
-                        ContentType=content_type,
-                        Metadata={
-                            "source": "douyin",
-                            "niche": account["niche"],
-                            "account_id": account["account_id"],
-                            "aweme_id": media["aweme_id"],
-                            "media_type": media_type,
-                        },
-                    )
-                    s3_url = f"s3://{bucket}/{key}"
-                    uploaded.append(
-                        {
-                            "status": "uploaded",
-                            "account_id": account["account_id"],
-                            "aweme_id": media["aweme_id"],
-                            "media_type": media_type,
-                            "index": media["index"],
-                            "s3_key": key,
-                            "s3_url": s3_url,
-                            "bytes": len(body),
-                            "content_type": content_type,
-                            "source_url": media["url"],
-                        }
-                    )
-                except Exception as exc:
-                    logger.warning("Media upload failed media_type=%s aweme_id=%s error=%s", media_type, media["aweme_id"], exc)
-                    uploaded.append(
-                        {
-                            "status": "failed",
-                            "account_id": account["account_id"],
-                            "aweme_id": media["aweme_id"],
-                            "media_type": media_type,
-                            "index": media["index"],
-                            "source_url": media["url"],
-                            "error": str(exc),
-                        }
-                    )
+        workers = max(1, env_int("DOUYIN_MEDIA_DOWNLOAD_WORKERS", 4))
+        workers = min(workers, len(media_tasks) or 1)
+        logger.info("Preparing parallel media download for %s awemes, %s media, workers=%s", len(awemes), len(media_tasks), workers)
+
+        uploaded = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(upload_single_media, client, bucket, account, media_prefix, media) for media in media_tasks]
+            for future in as_completed(futures):
+                uploaded.append(future.result())
 
         logger.info("Processed %s media objects", len(uploaded))
         return uploaded
@@ -538,24 +604,68 @@ def crawl_douyin_seed_to_s3_landing():
             raise AirflowSkipException("DATABRICKS_HOST, DATABRICKS_TOKEN, or DATABRICKS_JOB_ID is not configured")
 
         payload = build_databricks_run_payload(job_id, landing_results)
-        req = request.Request(
-            f"{host}/api/2.1/jobs/run-now",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
         logger.info("Triggering Databricks job_id=%s after %s landing writes", job_id, len(landing_results))
-        with request.urlopen(req, timeout=60) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        return {
+        result = request_json(
+            f"{host}/api/2.1/jobs/run-now",
+            method="POST",
+            payload=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        run_info = {
             "job_id": job_id,
             "run_id": result.get("run_id"),
             "number_in_job": result.get("number_in_job"),
             "run_page_url": result.get("run_page_url"),
         }
+        wait_for_databricks_run(host, token, run_info["run_id"])
+        return run_info
+
+    def get_databricks_run(host: str, token: str, run_id: int | str) -> dict:
+        """Read one Databricks run state from Jobs API."""
+        return request_json(
+            f"{host}/api/2.1/jobs/runs/get?run_id={run_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+
+    def wait_for_databricks_run(host: str, token: str, run_id: int | str | None) -> None:
+        """Poll Databricks run until success or fail Airflow on terminal failure."""
+        if not run_id:
+            raise RuntimeError("Databricks run-now response did not include run_id")
+
+        poll_seconds = max(5, env_int("DATABRICKS_RUN_POLL_SECONDS", 30))
+        timeout_minutes = max(1, env_int("DATABRICKS_RUN_TIMEOUT_MINUTES", 120))
+        deadline = time.monotonic() + timeout_minutes * 60
+
+        while True:
+            run = get_databricks_run(host, token, run_id)
+            state = run.get("state") or {}
+            life_cycle_state = state.get("life_cycle_state")
+            result_state = state.get("result_state")
+            state_message = state.get("state_message") or ""
+            run_page_url = run.get("run_page_url") or ""
+            logger.info(
+                "Databricks run_id=%s life_cycle_state=%s result_state=%s message=%s url=%s",
+                run_id,
+                life_cycle_state,
+                result_state,
+                state_message,
+                run_page_url,
+            )
+
+            if life_cycle_state == "TERMINATED" and result_state == "SUCCESS":
+                return
+            if life_cycle_state in {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}:
+                raise RuntimeError(
+                    f"Databricks run failed run_id={run_id} "
+                    f"life_cycle_state={life_cycle_state} result_state={result_state} "
+                    f"message={state_message} url={run_page_url}"
+                )
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Databricks run timeout run_id={run_id} after {timeout_minutes} minutes")
+
+            time.sleep(poll_seconds)
 
     # -------------------------------------------------------------------------
     # Airflow tasks and dependencies
@@ -571,10 +681,11 @@ def crawl_douyin_seed_to_s3_landing():
         return results
 
     @task(retries=0)
-    def write_seed_processing_manifest(landing_results: list[dict]) -> list[dict]:
-        """Persist S3 control manifest so the same CSV is not processed again."""
+    def write_seed_processing_manifest(landing_results: list[dict], databricks_result: dict) -> list[dict]:
+        """Persist S3 control manifest only after Databricks succeeds."""
         if not landing_results:
             raise AirflowSkipException("No landing results to mark as processed")
+        logger.info("Databricks succeeded; marking seed processed: %s", databricks_result)
         write_processed_seed_manifest(landing_results)
         return landing_results
 
@@ -584,8 +695,8 @@ def crawl_douyin_seed_to_s3_landing():
         return run_databricks_job(landing_results)
 
     landing_results = crawl_seed_accounts()
-    processed_results = write_seed_processing_manifest(landing_results)
-    trigger_databricks_job(processed_results)
+    databricks_result = trigger_databricks_job(landing_results)
+    write_seed_processing_manifest(landing_results, databricks_result)
 
 
 crawl_douyin_seed_to_s3_landing()
