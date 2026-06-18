@@ -106,7 +106,13 @@ Ghi chú:
 Seed mặc định hiện dùng CSV để dễ nhập bằng Excel/Google Sheets:
 
 ```text
-seeds/douyin_food_restaurant_seed_accounts.csv
+seeds/douyin_food_restaurant_seed_accounts.csv.example
+```
+
+File `.csv.example` chỉ để tham khảo và không được DAG tự đọc vì pattern mặc định là `*.csv`. Khi chạy thật, copy/rename thành file `.csv` mới trong `seeds/`, ví dụ:
+
+```powershell
+Copy-Item seeds/douyin_food_restaurant_seed_accounts.csv.example seeds/upload_20260618.csv
 ```
 
 Cột tối thiểu người dùng cần nhập:
@@ -126,7 +132,7 @@ Người dùng nhập đúng 4 cột: `niche`, `link`, `limit`, `start_date`. DA
 Validate CSV trước khi chạy DAG:
 
 ```powershell
-python tools/validate_seed_csv.py seeds/douyin_food_restaurant_seed_accounts.csv
+python tools/validate_seed_csv.py seeds/upload_20260618.csv
 ```
 
 Ghi file normalized đầy đủ cột nếu cần:
@@ -135,28 +141,28 @@ Ghi file normalized đầy đủ cột nếu cần:
 python tools/validate_seed_csv.py input.csv --write-normalized seeds/ready_to_run.csv
 ```
 
-DAG `crawl_douyin_seed_to_s3_landing` t? t?m file CSV m?i nh?t trong `seeds/` theo pattern `*.csv`. N?u kh?ng c? CSV, DAG fallback v? YAML `seeds/douyin_food_restaurant_seeds.yml`.
+DAG `crawl_douyin_seed_to_s3_landing` tự tìm file CSV mới nhất trong `seeds/` theo pattern `*.csv`. Nếu không có CSV, DAG fallback về YAML `seeds/douyin_food_restaurant_seeds.yml`.
 
-N?u mu?n ?p DAG ??c ??ng m?t file c? th?, set trong `.env`:
+Nếu muốn ép DAG đọc đúng một file cụ thể, set trong `.env`:
 
 ```powershell
 AIRFLOW_DOUYIN_SEED_CSV_FILE=/opt/airflow/seeds/ten_file.csv
 ```
 
-N?u ?? tr?ng `AIRFLOW_DOUYIN_SEED_CSV_FILE`, DAG t? ch?n file m?i nh?t theo:
+Nếu để trống `AIRFLOW_DOUYIN_SEED_CSV_FILE`, DAG tự chọn file mới nhất theo:
 
 ```powershell
 AIRFLOW_DOUYIN_SEED_CSV_DIR=/opt/airflow/seeds
 AIRFLOW_DOUYIN_SEED_CSV_PATTERN=*.csv
 ```
 
-DAG t?nh SHA-256 cho n?i dung CSV v? ghi manifest success l?n S3 sau khi crawl xong:
+DAG tính SHA-256 cho nội dung CSV và ghi manifest success lên S3 sau khi crawl xong:
 
 ```text
 s3://your-lakehouse-bucket/lakehouse/control/douyin/processed_seed_files/{file_hash}.json
 ```
 
-L?n ch?y sau, DAG b? qua CSV ?? c? manifest success v? ch?n CSV m?i nh?t ch?a x? l?. Mu?n ch?y l?i CSV c?, s?a n?i dung file ho?c x?a manifest control t??ng ?ng tr?n S3.
+Lần chạy sau, DAG bỏ qua CSV đã có manifest success và chọn CSV mới nhất chưa xử lý. Muốn chạy lại CSV cũ, sửa nội dung file hoặc xóa manifest control tương ứng trên S3.
 
 ## AWS S3 Data Lake
 
