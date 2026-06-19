@@ -36,6 +36,16 @@ MEDIA_EXTENSIONS = {
 }
 
 
+class HttpRequestError(RuntimeError):
+    """HTTP error with status code and response body preserved for retry/logging."""
+
+    def __init__(self, url: str, status_code: int, body: str):
+        super().__init__(f"HTTP {status_code} calling {url}: {body}")
+        self.url = url
+        self.status_code = status_code
+        self.body = body
+
+
 @dag(
     dag_id="crawl_douyin_seed_to_s3_landing",
     description="Read Douyin seed CSV/YAML, crawl accounts, write raw JSON/media to S3, then trigger Databricks.",
@@ -83,12 +93,16 @@ def crawl_douyin_seed_to_s3_landing():
         return env_str(name, default).strip("/")
 
     def request_json(url: str, method: str = "GET", payload: dict | None = None, headers: dict | None = None, timeout: int = 60) -> dict:
-        """Send an HTTP request and parse a JSON response."""
+        """Send an HTTP request and parse a JSON response with useful error detail."""
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         request_headers = {"Content-Type": "application/json", **(headers or {})}
         req = request.Request(url, data=body, headers=request_headers, method=method)
-        with request.urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")[:1000]
+            raise HttpRequestError(url, exc.code, error_body) from exc
 
     def request_json_with_retry(
         url: str,
@@ -104,11 +118,11 @@ def crawl_douyin_seed_to_s3_landing():
         for attempt in range(1, retry_times + 1):
             try:
                 return request_json(url, method=method, payload=payload, headers=headers, timeout=timeout)
-            except error.HTTPError as exc:
+            except HttpRequestError as exc:
                 last_error = exc
-                if exc.code < 500 or attempt == retry_times:
+                if exc.status_code < 500 or attempt == retry_times:
                     raise
-                logger.warning("HTTP request failed attempt=%s status=%s url=%s", attempt, exc.code, url)
+                logger.warning("HTTP request failed attempt=%s status=%s url=%s", attempt, exc.status_code, url)
             except Exception as exc:
                 last_error = exc
                 if attempt == retry_times:
@@ -120,73 +134,115 @@ def crawl_douyin_seed_to_s3_landing():
     # -------------------------------------------------------------------------
     # Seed file discovery and processed-state control
     # -------------------------------------------------------------------------
-    def load_seed_targets() -> list[dict]:
-        """Load crawl targets from the latest unprocessed CSV file."""
-        csv_file = discover_seed_csv_file()
-        if not csv_file:
-            raise AirflowSkipException("No seed CSV file found to process")
-        return load_seed_targets_from_csv(csv_file)
+    def load_seed_targets(seed_file: Path) -> list[dict]:
+        """Load crawl targets from one CSV file."""
+        return load_seed_targets_from_csv(seed_file)
 
-    def discover_seed_csv_file() -> Path | None:
-        """Find the explicit CSV file or latest unprocessed CSV in the seed folder."""
+    def discover_seed_csv_files() -> list[Path]:
+        """Find explicit CSV or all un-ingested CSV files in the seed folder."""
         explicit_file = env_str("DOUYIN_SEED_CSV_FILE")
         if explicit_file:
             path = Path(explicit_file)
-            if path.exists():
-                logger.info("Using explicit seed CSV file: %s", path)
-                return path
-            logger.warning("Explicit seed CSV file does not exist; auto-discovery will be used: %s", path)
+            if not path.exists():
+                raise FileNotFoundError(f"Explicit seed CSV file does not exist: {path}")
+            if seed_csv_was_ingested(path):
+                logger.info("Explicit seed CSV already ingested: %s", path)
+                return []
+            logger.info("Using explicit seed CSV file: %s", path)
+            return [path]
 
         seed_dir = Path(env_str("DOUYIN_SEED_CSV_DIR", "/opt/airflow/seeds"))
         pattern = env_str("DOUYIN_SEED_CSV_PATTERN", "*.csv") or "*.csv"
         if not seed_dir.exists():
             logger.warning("Seed CSV directory does not exist: %s", seed_dir)
-            return None
+            return []
 
         candidates = [path for path in seed_dir.glob(pattern) if path.is_file() and not path.name.startswith(".")]
         if not candidates:
             logger.info("No seed CSV files found in %s with pattern %s", seed_dir, pattern)
-            return None
+            return []
 
-        for candidate in sorted(candidates, key=lambda path: path.stat().st_mtime, reverse=True):
-            if not seed_csv_was_processed(candidate):
-                logger.info("Auto-discovered latest unprocessed seed CSV file: %s", candidate)
-                return candidate
-
-        raise AirflowSkipException("All discovered seed CSV files were already processed successfully")
+        seed_files = [candidate for candidate in sorted(candidates, key=lambda path: path.stat().st_mtime) if not seed_csv_was_ingested(candidate)]
+        if seed_files:
+            logger.info("Discovered %s un-ingested seed CSV files: %s", len(seed_files), [path.name for path in seed_files])
+        return seed_files
 
     def seed_file_hash(seed_file: Path) -> str:
-        """Calculate SHA-256 hash for CSV content to identify already processed files."""
+        """Calculate SHA-256 hash for CSV content."""
         digest = hashlib.sha256()
         with seed_file.open("rb") as file:
             for chunk in iter(lambda: file.read(1024 * 1024), b""):
                 digest.update(chunk)
         return digest.hexdigest()
 
-    def seed_manifest_key(file_hash: str) -> str:
-        """Build S3 control-manifest key for a processed seed CSV hash."""
+    def processed_seed_manifest_key(file_hash: str) -> str:
+        """Build S3 control-manifest key for a transformed seed CSV hash."""
         prefix = s3_prefix("S3_CONTROL_PREFIX", "lakehouse/control/douyin/processed_seed_files")
         return f"{prefix}/{file_hash}.json"
 
-    def seed_csv_was_processed(seed_file: Path) -> bool:
-        """Check S3 control manifest to skip CSV files already processed successfully."""
-        bucket = env_str("S3_BUCKET")
-        if not bucket:
-            logger.warning("S3_BUCKET is not configured; seed CSV processed-state check is disabled")
-            return False
+    def ingested_seed_manifest_prefix() -> str:
+        """S3 prefix for seed files that already wrote landing data."""
+        return s3_prefix("S3_INGESTED_CONTROL_PREFIX", "lakehouse/control/douyin/ingested_seed_files")
 
-        file_hash = seed_file_hash(seed_file)
-        key = seed_manifest_key(file_hash)
+    def ingested_seed_manifest_key(file_hash: str) -> str:
+        """Build S3 control-manifest key for an ingested seed CSV hash."""
+        return f"{ingested_seed_manifest_prefix()}/{file_hash}.json"
+
+    def s3_key_exists(bucket: str, key: str) -> bool:
+        """Return whether one S3 key exists."""
         client = s3_client()
         try:
             client.head_object(Bucket=bucket, Key=key)
-            logger.info("Seed CSV already processed successfully: file=%s hash=%s", seed_file.name, file_hash)
             return True
         except client.exceptions.ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code")
             if error_code in {"404", "NoSuchKey", "NotFound"}:
                 return False
             raise
+
+    def seed_csv_was_ingested(seed_file: Path) -> bool:
+        """Check S3 control manifest to skip CSV files whose landing data exists."""
+        bucket = env_str("S3_BUCKET")
+        if not bucket:
+            logger.warning("S3_BUCKET is not configured; seed CSV ingested-state check is disabled")
+            return False
+        file_hash = seed_file_hash(seed_file)
+        exists = s3_key_exists(bucket, ingested_seed_manifest_key(file_hash))
+        if exists:
+            logger.info("Seed CSV already ingested: file=%s hash=%s", seed_file.name, file_hash)
+        return exists
+
+    def seed_hash_was_processed(file_hash: str) -> bool:
+        """Check S3 control manifest to skip seed hashes already transformed by Databricks."""
+        bucket = env_str("S3_BUCKET")
+        if not bucket:
+            logger.warning("S3_BUCKET is not configured; processed-state check is disabled")
+            return False
+        return s3_key_exists(bucket, processed_seed_manifest_key(file_hash))
+
+    def load_pending_ingested_landing_results() -> list[dict]:
+        """Load landing results for ingested CSV files not yet marked processed."""
+        bucket = env_str("S3_BUCKET")
+        if not bucket:
+            return []
+
+        prefix = ingested_seed_manifest_prefix()
+        paginator = s3_client().get_paginator("list_objects_v2")
+        pending_results = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/"):
+            for item in page.get("Contents", []):
+                key = item.get("Key", "")
+                if not key.endswith(".json"):
+                    continue
+                file_hash = Path(key).stem
+                if seed_hash_was_processed(file_hash):
+                    continue
+                body = s3_client().get_object(Bucket=bucket, Key=key)["Body"].read()
+                manifest = json.loads(body.decode("utf-8"))
+                landing_results = manifest.get("landing_results") or []
+                pending_results.extend(landing_results)
+                logger.info("Loaded pending ingested seed manifest s3://%s/%s results=%s", bucket, key, len(landing_results))
+        return pending_results
 
     # -------------------------------------------------------------------------
     # Seed parsing and target normalization
@@ -638,45 +694,71 @@ def crawl_douyin_seed_to_s3_landing():
             "seed_file_hash": account.get("seed_file_hash", ""),
         }
 
-    def write_processed_seed_manifest(landing_results: list[dict]) -> None:
-        """Mark a CSV seed as processed after landing writes succeed."""
-        first = landing_results[0]
-        file_hash = str(first.get("seed_file_hash") or "").strip()
-        if not file_hash:
-            logger.info("Landing results did not come from CSV; skipping seed processing manifest")
-            return
+    def group_landing_results_by_seed_hash(landing_results: list[dict]) -> dict[str, list[dict]]:
+        """Group landing result rows by source seed CSV hash."""
+        grouped: dict[str, list[dict]] = {}
+        for result in landing_results:
+            file_hash = str(result.get("seed_file_hash") or "").strip()
+            if file_hash:
+                grouped.setdefault(file_hash, []).append(result)
+        return grouped
 
+    def write_seed_control_manifest(file_hash: str, results: list[dict], artifact: str, status: str, timestamp_field: str) -> None:
+        """Write one seed control manifest to S3."""
+        if not results:
+            return
         bucket = env_str("S3_BUCKET")
         if not bucket:
             raise AirflowSkipException("S3_BUCKET is not configured")
 
+        first = results[0]
         now = datetime.now(timezone.utc)
-        key = seed_manifest_key(file_hash)
+        key = ingested_seed_manifest_key(file_hash) if artifact == "ingested_seed_file" else processed_seed_manifest_key(file_hash)
         manifest_payload = {
             "pipeline": "de-e2e",
             "source": "douyin",
-            "artifact": "processed_seed_file",
-            "status": "success",
+            "artifact": artifact,
+            "status": status,
             "seed_file_name": first.get("seed_file_name", ""),
             "seed_file_path": first.get("seed_file_path", ""),
             "seed_file_hash": file_hash,
-            "processed_at": now.isoformat(),
-            "landing_result_count": len(landing_results),
-            "landing_uris": [result.get("uri") for result in landing_results if result.get("uri")],
+            timestamp_field: now.isoformat(),
+            "landing_result_count": len(results),
+            "landing_uris": [result.get("uri") for result in results if result.get("uri")],
+            "media_manifest_uris": [result.get("media_manifest_uri") for result in results if result.get("media_manifest_uri")],
+            "landing_results": results,
         }
         body = json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        logger.info("Writing seed processing manifest to s3://%s/%s", bucket, key)
+        logger.info("Writing seed control manifest artifact=%s to s3://%s/%s", artifact, bucket, key)
         s3_client().put_object(
             Bucket=bucket,
             Key=key,
             Body=body,
             ContentType="application/json; charset=utf-8",
             Metadata={
-                "artifact": "processed_seed_file",
-                "status": "success",
+                "artifact": artifact,
+                "status": status,
                 "seed_file_hash": file_hash,
             },
         )
+
+    def write_ingested_seed_manifest(landing_results: list[dict]) -> None:
+        """Mark each crawled CSV as ingested after landing writes succeed."""
+        grouped = group_landing_results_by_seed_hash(landing_results)
+        if not grouped:
+            logger.info("Landing results did not come from CSV; skipping ingested seed manifest")
+            return
+        for file_hash, results in grouped.items():
+            write_seed_control_manifest(file_hash, results, "ingested_seed_file", "success", "ingested_at")
+
+    def write_processed_seed_manifest(landing_results: list[dict]) -> None:
+        """Mark each seed CSV as processed after Databricks succeeds."""
+        grouped = group_landing_results_by_seed_hash(landing_results)
+        if not grouped:
+            logger.info("Landing results did not come from CSV; skipping processed seed manifest")
+            return
+        for file_hash, results in grouped.items():
+            write_seed_control_manifest(file_hash, results, "processed_seed_file", "success", "processed_at")
 
     # -------------------------------------------------------------------------
     # Downstream Databricks trigger
@@ -777,12 +859,23 @@ def crawl_douyin_seed_to_s3_landing():
     # -------------------------------------------------------------------------
     @task(retries=0)
     def crawl_seed_accounts() -> list[dict]:
-        """Crawl all targets from the selected seed file and write S3 landing outputs."""
-        results = []
-        for account in load_seed_targets():
-            logger.info("Processing account_id=%s", account["account_id"])
-            raw_response = crawl_target(account)
-            results.append(write_landing(account, raw_response))
+        """Load pending ingested results, then crawl all new seed CSV files."""
+        results = load_pending_ingested_landing_results()
+        seed_files = discover_seed_csv_files()
+
+        if not seed_files and not results:
+            raise AirflowSkipException("No new or pending seed CSV files to process")
+
+        for seed_file in seed_files:
+            csv_results = []
+            logger.info("Processing seed CSV file: %s", seed_file)
+            for account in load_seed_targets(seed_file):
+                logger.info("Processing account_id=%s seed_file=%s", account["account_id"], seed_file.name)
+                raw_response = crawl_target(account)
+                csv_results.append(write_landing(account, raw_response))
+            write_ingested_seed_manifest(csv_results)
+            results.extend(csv_results)
+
         return results
 
     @task(retries=0)
